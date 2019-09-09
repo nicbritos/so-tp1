@@ -6,64 +6,64 @@
 
 #define CHUNK_SIZE 5
 
-typedef struct FileWalker {
+typedef struct FileWalkerCDT {
     char **list = NULL;
     char *regex = NULL;
     int size = 0;
     int effectiveSize = 0;
 } FileWalkerCDT;
 
-void add(char *s, FileWalker *fileWalker);
+void add(char *s, FileWalkerCDT *FileWalkerCDT);
 int matchesRegex(char *s, char *regex);
-int processEntry(char *entry, FileWalker *fileWalker);
+int processEntry(char *entry, FileWalkerCDT *FileWalkerCDT);
 
 
 // ----------- PUBLIC -----------
-FileWalker *newFileWalkerADT(char *regex) {
-    FileWalker *fileWalker = calloc(sizeof(FileWalker));
-    fileWalker->regex = regex;
-    return fileWalker;
+FileWalkerCDT *newFileWalkerADT(char *regex) {
+    FileWalkerCDT *FileWalkerCDT = calloc(sizeof(FileWalkerCDT));
+    FileWalkerCDT->regex = regex;
+    return FileWalkerCDT;
 }
 
-void listFilesFileWalker(int size, char **inList, FileWalker *fileWalker) {
-    if (fileWalker->list != NULL) {
-        freeListFileWalker(fileWalker);
+void listFilesFileWalker(int size, char **inList, FileWalkerCDT *FileWalkerCDT) {
+    if (FileWalkerCDT->list != NULL) {
+        freeListFileWalker(FileWalkerCDT);
     }
 
-    fileWalker->list = calloc(CHUNK_SIZE * sizeof(char*));
-    fileWalker->size = CHUNK_SIZE;
+    FileWalkerCDT->list = calloc(CHUNK_SIZE * sizeof(char*));
+    FileWalkerCDT->size = CHUNK_SIZE;
 
     int result;
     for (int i = 0; i < size; i++) {
-        processEntry(inList[i], fileWalker);
+        processEntry(inList[i], FileWalkerCDT);
     }
 
     return list;
 }
 
-void freeListFileWalker(FileWalker *fileWalker) {
-    for (int i = 0; i < getCount(fileWalker); i++) {
-        free(fileWalker->list[i]);
+void freeListFileWalker(FileWalkerCDT *FileWalkerCDT) {
+    for (int i = 0; i < getCount(FileWalkerCDT); i++) {
+        free(FileWalkerCDT->list[i]);
     }
-    free(fileWalker->list);
-    fileWalker->list = NULL;
-    fileWalker->size = 0;
+    free(FileWalkerCDT->list);
+    FileWalkerCDT->list = NULL;
+    FileWalkerCDT->size = 0;
 }
 
-int getCountFileWalker(FileWalker *fileWalker) {
-    return fileWalker->effectiveSize;
+int getCountFileWalker(FileWalkerCDT *FileWalkerCDT) {
+    return FileWalkerCDT->effectiveSize;
 }
 
 
 // ----------- PRIVATE -----------
-void add(char *s, FileWalker *fileWalker) {
-    if (fileWalker->size - getCountFileWalker(fileWalker) == 0) {
-        fileWalker->size += CHUNK_SIZE;
-        fileWalker->list = realloc(fileWalker->list, sizeof(fileWalker->list) * fileWalker->size);
+void add(char *s, FileWalkerCDT *FileWalkerCDT) {
+    if (FileWalkerCDT->size - getCountFileWalker(FileWalkerCDT) == 0) {
+        FileWalkerCDT->size += CHUNK_SIZE;
+        FileWalkerCDT->list = realloc(FileWalkerCDT->list, sizeof(FileWalkerCDT->list) * FileWalkerCDT->size);
     }
 
-    fileWalker->list[getCountFileWalker(fileWalker)] = s;
-    fileWalker->effectiveSize += 1;
+    FileWalkerCDT->list[getCountFileWalker(FileWalkerCDT)] = s;
+    FileWalkerCDT->effectiveSize += 1;
 }
 
 int matchesRegex(char *s, char *regex) {
@@ -82,12 +82,12 @@ int matchesRegex(char *s, char *regex) {
     return !result;
 }
 
-void processEntry(char *entry, FileWalker *fileWalker) {
+void processEntry(char *entry, FileWalkerCDT *FileWalkerCDT) {
     struct stat statData;
 
     if (stat(inList[i], &statData) == -1) {
         perror("Error getting file description:");
-        freeFileWalker(fileWalker);
+        freeFileWalker(FileWalkerCDT);
         exit(1);
     }
 
@@ -95,7 +95,7 @@ void processEntry(char *entry, FileWalker *fileWalker) {
     int result = statData.st_mode & S_IFMT;
     // Only process entry if it's a regular file. 
     // The scan process IS NOT RECURSIVE
-    if (result == S_IFREG && matchesRegex(inList[i], fileWalker->regex)) {
-        add(inList[i], fileWalker);
+    if (result == S_IFREG && matchesRegex(inList[i], FileWalkerCDT->regex)) {
+        add(inList[i], FileWalkerCDT);
     }
 }

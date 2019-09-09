@@ -1,7 +1,7 @@
 #ifndef SO_FILE_WALKER_H
 #define SO_FILE_WALKER_H
 
-typedef FileWalkerADT *FileWalker;
+typedef struct FileWalkerCDT *FileWalkerADT;
 
 FileWalkerADT newFileWalkerADT(char *regex);
 void listFilesFileWalker(int size, char **inList, FileWalkerADT fileWalkerADT);
