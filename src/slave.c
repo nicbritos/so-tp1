@@ -15,14 +15,6 @@
 #define SHARED_PIPE_SAT_NPIPE_FILE "/tmp/tp1NamedPipe"
 #define OUT_FILE "./tp1_output.txt"
 
-#define PIPE_IN_BUFFER_SIZE 4096
-
-int getSlavesQuantity(int filesSize);
-void closeSharedMemory(int fd, char *name);
-void closeSemaphore(sem_t *sem, char *name);
-void closePipe(int fd);
-void saveFile(int fd, int count, SatStruct *satStruct);
-
 int main(int argc, char **argv) {
     int filesSize = argc - 1;
     if (filesSize < 1) {
@@ -62,7 +54,7 @@ int main(int argc, char **argv) {
         exit(-1);
     }
 
-    int pipefd = open(SHARED_PIPE_SAT_NPIPE_FILE, O_RDWR);
+    int pipefd = open(myfifo, O_RDWR);
     if (pipefd == -1) {
         perror("Could not open named pipe: ");
         closeSemaphore(solvedSemaphore, SHARED_SOLVED_SAT_SEMAPHORE_NAME);
@@ -79,78 +71,6 @@ int main(int argc, char **argv) {
         exit(-1);
     }
 
-    // No se si esto o PID. Es para que lo reciba la app vista
-    printf(SHARED_SAT_MEMORY_NAME);
-
-    int slavesQuantity = getSlavesQuantity(filesSize);
-    char **files = argv + 1;
-    int satFinished = 0;
-    for (int i = 0; i < slavesQuantity; i++) {
-        int forkResult = fork();
-        if (forkResult > 0) {
-            // Padre -- No hace nada
-        } else if (forkResult == -1) {
-            // error
-        } else {
-            // Hijo --> Instanciar cada slave (ver enunciado)
-            char *arguments[3] = {SHARED_PIPE_SAT_NPIPE_FILE, SHARED_SOLVED_SAT_SEMAPHORE_NAME, NULL};
-            execvp("./slave.out", arguments);
-        }
-    }
-
-    // TODO: Idle processes when there are no more files to be processed
-    // Aca tenemos que esperar a que haya datos. Para esto, solo podemos hacer un wait y esperar a un post.
-    // Ni idea como hacer esto despues
-    char inBuffer[PIPE_IN_BUFFER_SIZE] = {0};
-    while (satFinished < filesSize) {
-        // Tenemos que ir llenando el buffer
-        sem_wait(solvedSemaphore);
-    }
-
-    closeSemaphore(solvedSemaphore, SHARED_SOLVED_SAT_SEMAPHORE_NAME);
-    closeSharedMemory(sharedMemoryfd, SHARED_SAT_MEMORY_NAME);
-    closePipe(pipefd);
-
-    saveFile(outfd, filesSize, map);
-    close(outfd);
 
     exit(0);
-}
-
-int getSlavesQuantity(int filesSize) {
-    // TODO: Change
-    return 10;
-}
-
-void closeSharedMemory(int fd, char *name) {
-    close(fd);
-    shm_unlink(name);
-}
-
-void closeSemaphore(sem_t *sem, char *name) {
-    sem_close(sem);
-    sem_unlink(name);
-}
-
-void closePipe(int fd) {
-    close(fd);
-}
-
-void saveFile(int fd, int count, SatStruct *satStruct) {
-    dprintf(fd, "TP1 - MINISAT output for %d files\n", count);
-    for (int i = 0; i < count; i++) {
-        dprintf(fd, 
-            "Filename: %s\n"
-             "Clauses: %d\n"
-             "Variables: %d\n"
-             "Satisfiable: %s\n"
-             "Processing time: %ld\n"
-             "Processed by Slave ID: %d\n\n", 
-            satStruct->filename,
-            satStruct->clauses,
-            satStruct->variables,
-            satStruct->isSat == 1 ? "SAT" : "UNSAT",
-            satStruct->processingTime,
-            satStruct->processedBySlaveID);
-    }
 }

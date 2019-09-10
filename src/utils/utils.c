@@ -1,5 +1,5 @@
 #include <stdio.h>
 
-int printError(char *s) {
+void printError(char *s) {
     fprintf(stderr, "%s\n", s);
 }

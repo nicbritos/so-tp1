@@ -1,7 +1,7 @@
 #ifndef SO_UTILS_H
 #define SO_UTILS_H
 
-int printError(char *s);
+void printError(char *s);
 
 // Gets all filepaths that match regex expression.
 // The list is null terminated and must be freed!
