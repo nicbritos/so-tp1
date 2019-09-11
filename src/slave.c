@@ -26,7 +26,6 @@
 #define ERROR_FIFO_OPEN_FAIL -7
 #define ERROR_FILE_OPEN_FAIL -8
 
-
 int main(int argc, char **argv) {
     int filesSize = argc - 1; // -1 porque argc tiene cantidad de parametros + 1
     if (filesSize < 1) {
@@ -37,7 +36,7 @@ int main(int argc, char **argv) {
     int sharedMemoryfd = shm_open(SHARED_SAT_MEMORY_NAME, O_CREAT | O_RDWR, READ_AND_WRITE_PERM);
     if (sharedMemoryfd == -1) {
         perror("Could not create shared memory object: ");
-        exit(ERROR_SHM_FAIL);
+        exit(ERROR_SHMOPEN_FAIL);
     }
     if (ftruncate(sharedMemoryfd, sizeof(SatStruct) * filesSize) == -1) {
         perror("Could not expand shared memory object: ");
@@ -66,7 +65,7 @@ int main(int argc, char **argv) {
         exit(ERROR_FIFO_CREATION_FAIL);
     }
 
-    int pipefd = open(myfifo, O_RDWR);
+    int pipefd = open(SHARED_PIPE_SAT_NPIPE_FILE, O_RDWR);
     if (pipefd == -1) {
         perror("Could not open named pipe: ");
         closeSemaphore(solvedSemaphore, SHARED_SOLVED_SAT_SEMAPHORE_NAME);
@@ -85,4 +84,6 @@ int main(int argc, char **argv) {
 
 
     exit(ERROR_NO);
+
+
 }

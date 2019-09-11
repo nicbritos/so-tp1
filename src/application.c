@@ -142,20 +142,6 @@ int getMinFilesQuantity(int filesSize){
     return floor(filesSize * FILES_MIN_PERCENTAGE);
 }
 
-void closeSharedMemory(int fd, char *name) {
-    close(fd);
-    shm_unlink(name);
-}
-
-void closeSemaphore(sem_t *sem, char *name) {
-    sem_close(sem);
-    sem_unlink(name);
-}
-
-void closePipe(int fd) {
-    close(fd);
-}
-
 void saveFile(int fd, int count, SatStruct *satStruct) {
     dprintf(fd, "TP1 - MINISAT output for %d files\n", count);
     for (int i = 0; i < count; i++) {
