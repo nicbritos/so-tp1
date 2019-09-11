@@ -1,5 +1,5 @@
-#ifndef SO_UTILS_H
-#define SO_UTILS_H
+#ifndef _SO_UTILS_H_
+#define _SO_UTILS_H_
 
 void printError(char *s);
 

@@ -9,6 +9,7 @@
 #include <sys/wait.h>
 #include "utils/utils.h"
 #include "utils/satStruct.h"
+#include "application.h"
 
 #define SHARED_SAT_MEMORY_NAME "/tp1SatMemory"
 #define SHARED_SOLVED_SAT_SEMAPHORE_NAME "/tp1SolvedSatSemaphore"
@@ -16,6 +17,7 @@
 #define OUT_FILE "./tp1_output.txt"
 
 #define PIPE_IN_BUFFER_SIZE 4096
+#define READ_AND_WRITE_PERM 0666
 
 #define ERROR_NO 0
 #define ERROR_NO_FILES -1
@@ -27,12 +29,6 @@
 #define ERROR_FIFO_OPEN_FAIL -7
 #define ERROR_FILE_OPEN_FAIL -8
 
-int getSlavesQuantity(int filesSize);
-void closeSharedMemory(int fd, char *name);
-void closeSemaphore(sem_t *sem, char *name);
-void closePipe(int fd);
-void saveFile(int fd, int count, SatStruct *satStruct);
-
 int main(int argc, char **argv) {
     int filesSize = argc - 1;
     if (filesSize < 1) {
@@ -40,16 +36,21 @@ int main(int argc, char **argv) {
         exit(ERROR_NO_FILES);
     }
 
-    int sharedMemoryfd = shm_open(SHARED_SAT_MEMORY_NAME, O_CREAT | O_RDWR, 0666);
+    //Create shared memory
+    int sharedMemoryfd = shm_open(SHARED_SAT_MEMORY_NAME, O_CREAT | O_RDWR, READ_AND_WRITE_PERM);
     if (sharedMemoryfd == -1) {
         perror("Could not create shared memory object: ");
         exit(ERROR_SHMOPEN_FAIL);
     }
+
+    //Reserve storage for shared memory
     if (ftruncate(sharedMemoryfd, sizeof(SatStruct) * filesSize) == -1) {
         perror("Could not expand shared memory object: ");
         closeSharedMemory(sharedMemoryfd, SHARED_SAT_MEMORY_NAME);
         exit(ERROR_FTRUNCATE_FAIL);
     }
+
+    //Map the shared memory
     SatStruct *map = (SatStruct*) mmap(NULL, sizeof(SatStruct) * filesSize, PROT_READ | PROT_WRITE, MAP_SHARED, sharedMemoryfd, 0);
     if (map == NULL) {
         perror("Could not map shared memory: ");
@@ -57,6 +58,7 @@ int main(int argc, char **argv) {
         exit(ERROR_MMAP_FAIL);
     }
 
+    //Create a shared semaphore
     sem_t *solvedSemaphore = sem_open(SHARED_SOLVED_SAT_SEMAPHORE_NAME, O_CREAT | O_RDWR);
     if (solvedSemaphore == SEM_FAILED) {
         perror("Could not create shared semaphore: ");
@@ -64,14 +66,15 @@ int main(int argc, char **argv) {
         exit(ERROR_SEMOPEN_FAIL);
     }
 
-    // Crea FIFO (named pipe)
-    if (mkfifo(SHARED_PIPE_SAT_NPIPE_FILE, 0666) == -1) {
+    // Create FIFO (named pipe)
+    if (mkfifo(SHARED_PIPE_SAT_NPIPE_FILE, READ_AND_WRITE_PERM) == -1) {
         perror("Could not create named pipe: ");
         closeSemaphore(solvedSemaphore, SHARED_SOLVED_SAT_SEMAPHORE_NAME);
         closeSharedMemory(sharedMemoryfd, SHARED_SAT_MEMORY_NAME);
         exit(ERROR_FIFO_CREATION_FAIL);
     }
 
+    // Open the FIFO 
     int pipefd = open(SHARED_PIPE_SAT_NPIPE_FILE, O_RDWR);
     if (pipefd == -1) {
         perror("Could not open named pipe: ");
@@ -80,7 +83,8 @@ int main(int argc, char **argv) {
         exit(ERROR_FIFO_CREATION_FAIL);
     }
 
-    int outfd = open(OUT_FILE, O_CREAT | O_RDONLY, 0666);
+    //Create the output file
+    int outfd = open(OUT_FILE, O_CREAT | O_RDONLY, READ_AND_WRITE_PERM);
     if (outfd == -1) {
         perror("Could not create output file: ");
         closeSemaphore(solvedSemaphore, SHARED_SOLVED_SAT_SEMAPHORE_NAME);
