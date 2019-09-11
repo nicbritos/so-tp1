@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <semaphore.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -18,6 +19,8 @@
 
 #define PIPE_IN_BUFFER_SIZE 4096
 #define READ_AND_WRITE_PERM 0666
+#define FILES_PER_SLAVE 10.0
+#define FILES_MIN_PERCENTAGE 0.05 
 
 #define ERROR_NO 0
 #define ERROR_NO_FILES -1
@@ -132,8 +135,11 @@ int main(int argc, char **argv) {
 }
 
 int getSlavesQuantity(int filesSize) {
-    // TODO: Change
-    return 10;
+    return ceil(filesSize / FILES_PER_SLAVE);
+}
+
+int getMinFilesQuantity(int filesSize){
+    return floor(filesSize * FILES_MIN_PERCENTAGE);
 }
 
 void closeSharedMemory(int fd, char *name) {
@@ -163,7 +169,7 @@ void saveFile(int fd, int count, SatStruct *satStruct) {
             satStruct->filename,
             satStruct->clauses,
             satStruct->variables,
-            satStruct->isSat == 1 ? "SAT" : "UNSAT",
+            satStruct->isSat == 0 ? "UNSAT" : "SAT",
             satStruct->processingTime,
             satStruct->processedBySlaveID);
     }

@@ -1,17 +1,21 @@
 CC=gcc
-CFLAGS=-Wall -pedantic -lrt -lpthread -std=c99
-SOURCES=application.c utils/utils.c utils/FileWalker.c
-OBJECTS=$(SOURCES:.cpp=.o)
+CFLAGS=-Wall -pedantic -lrt -lpthread -std=c99 -lm
+SOURCES=src/application.c src/utils/utils.c
+OBJECTS=$(SOURCES:.c=.o)
 EXECUTABLE=tp1
 
-all: $(SOURCES) $(EXECUTABLE)
+all: linkedit
 
-$(EXECUTABLE): $(SOURCES)	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
-	
-# application.c: $(OBJECTS)	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
-	
-# utils/utils.c: $(OBJECTS)	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
+linkedit: compile $(OBJECTS)
+	$(CC) $(OBJECTS) -o $(EXECUTABLE) $(CFLAGS)
 
-.cpp.o:	$(CC) $(CFLAGS) $< -o $@
+compile: $(SOURCES)
 
-clean:	rm -rf *.o ${EXECUTABLE}
+src/application.c:
+	$(CC) -c src/application.c $(CFLAGS)
+
+src/slave.c:
+	$(CC) -c src/slave.c $(CFLAGS)
+
+clean:
+	rm $(OBJECTS) ${EXECUTABLE}
