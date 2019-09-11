@@ -15,4 +15,6 @@ void closeSemaphore(sem_t *sem, char *name);
 
 void closePipe(int fd);
 
+int min(int a, int b);
+
 #endif

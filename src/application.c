@@ -139,7 +139,7 @@ int getSlavesQuantity(int filesSize) {
 }
 
 int getMinFilesQuantity(int filesSize){
-    return floor(filesSize * FILES_MIN_PERCENTAGE);
+    return min(floor(filesSize * FILES_MIN_PERCENTAGE), floor(FILES_PER_SLAVE/2));
 }
 
 void saveFile(int fd, int count, SatStruct *satStruct) {

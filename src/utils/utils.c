@@ -23,3 +23,7 @@ void closeSemaphore(sem_t *sem, char *name) {
 void closePipe(int fd) {
     close(fd);
 }
+
+int min(int a, int b){
+	return (a<b)?a:b;
+}
