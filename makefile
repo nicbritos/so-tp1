@@ -4,14 +4,17 @@ SOURCES=src/application.c src/utils/utils.c
 OBJECTS=$(SOURCES:.c=.o)
 EXECUTABLE=tp1
 
-all: linkedit slave
+all: application slave view
 
-linkedit: compile $(OBJECTS)
+application: compile $(OBJECTS)
 
 	$(CC) $(OBJECTS) -o $(EXECUTABLE) $(CFLAGS)
 
 slave: src/slave.o src/utils/utils.o
 	$(CC) src/slave.o src/utils/utils.o -o src/slave $(CFLAGS)
+
+view: src/view.o src/utils/utils.o
+	$(CC) src/view.o src/utils/utils.o -o src/view $(CFLAGS)
 
 compile: $(SOURCES)
 
@@ -23,6 +26,9 @@ src/slave.o:
 
 src/utils/utils.o:
 	$(CC) -c src/utils/utils.c -o src/utils/utils.o $(CFLAGS)
+
+src/view.o:
+	$(CC) -c src/view.c -o src/view.o $(CFLAGS)
 
 clean:
 	rm $(OBJECTS) src/slave.o src/slave ${EXECUTABLE}
