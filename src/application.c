@@ -12,8 +12,8 @@
 #include "utils/satStruct.h"
 #include "application.h"
 
-#define SHARED_SAT_MEMORY_NAME "/tp1SatMemory"
-#define SHARED_SOLVED_SAT_SEMAPHORE_NAME "/tp1SolvedSatSemaphore"
+#define SHARED_SAT_MEMORY_NAME "/tp1mem%lu"
+#define SHARED_SAT_DATA_SEMAPHORE_NAME "/tp1sem%lu"
 #define SHARED_PIPE_SAT_NPIPE_FILE "/tmp/tp1NamedPipe"
 #define OUT_FILE "./tp1_output.txt"
 
@@ -21,6 +21,8 @@
 #define READ_AND_WRITE_PERM 0666
 #define FILES_PER_SLAVE 10.0
 #define FILES_MIN_PERCENTAGE 0.05 
+#define MAX_SHARED_MEMORY_NAME_LENGTH 256
+#define MAX_SEMAPHORE_NAME_LENGTH 256
 
 #define ERROR_NO 0
 #define ERROR_NO_FILES -1
@@ -39,8 +41,12 @@ int main(int argc, char **argv) {
         exit(ERROR_NO_FILES);
     }
 
+    pid_t pid = getpid();
+
     //Create shared memory
-    int sharedMemoryfd = shm_open(SHARED_SAT_MEMORY_NAME, O_CREAT | O_RDWR, READ_AND_WRITE_PERM);
+    char *sharedMemoryName = calloc(1, sizeof(char) * MAX_SHARED_MEMORY_NAME_LENGTH);
+    snprintf(sharedMemoryName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_SAT_MEMORY_NAME, pid);
+    int sharedMemoryfd = shm_open(sharedMemoryName, O_CREAT | O_RDWR, READ_AND_WRITE_PERM);
     if (sharedMemoryfd == -1) {
         perror("Could not create shared memory object: ");
         exit(ERROR_SHMOPEN_FAIL);
@@ -49,31 +55,36 @@ int main(int argc, char **argv) {
     //Reserve storage for shared memory
     if (ftruncate(sharedMemoryfd, sizeof(SatStruct) * filesSize) == -1) {
         perror("Could not expand shared memory object: ");
-        closeSharedMemory(sharedMemoryfd, SHARED_SAT_MEMORY_NAME);
+        closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
         exit(ERROR_FTRUNCATE_FAIL);
     }
 
     //Map the shared memory
-    SatStruct *map = (SatStruct*) mmap(NULL, sizeof(SatStruct) * filesSize, PROT_READ | PROT_WRITE, MAP_SHARED, sharedMemoryfd, 0);
-    if (map == NULL) {
+    size_t satStructsSize = sizeof(SatStruct) * filesSize;
+    SatStruct *satStructs = (SatStruct*) mmap(NULL, satStructsSize, PROT_READ | PROT_WRITE, MAP_SHARED, sharedMemoryfd, 0);
+    if (satStructs == NULL) {
         perror("Could not map shared memory: ");
-        closeSharedMemory(sharedMemoryfd, SHARED_SAT_MEMORY_NAME);
+        closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
         exit(ERROR_MMAP_FAIL);
     }
 
-    //Create a shared semaphore
-    sem_t *solvedSemaphore = sem_open(SHARED_SOLVED_SAT_SEMAPHORE_NAME, O_CREAT | O_RDWR);
+    //Create shared semaphore (View)
+    char *sharedSemaphoreName = calloc(1, sizeof(char) * MAX_SEMAPHORE_NAME_LENGTH);
+    snprintf(sharedSemaphoreName, MAX_SEMAPHORE_NAME_LENGTH, SHARED_SAT_DATA_SEMAPHORE_NAME, pid);
+    sem_t *solvedSemaphore = sem_open(sharedSemaphoreName, O_CREAT | O_RDWR);
     if (solvedSemaphore == SEM_FAILED) {
         perror("Could not create shared semaphore: ");
-        closeSharedMemory(sharedMemoryfd, SHARED_SAT_MEMORY_NAME);
+        unmapSharedMemory(satStructs, satStructsSize);
+        closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
         exit(ERROR_SEMOPEN_FAIL);
     }
 
     // Create FIFO (named pipe)
     if (mkfifo(SHARED_PIPE_SAT_NPIPE_FILE, READ_AND_WRITE_PERM) == -1) {
         perror("Could not create named pipe: ");
-        closeSemaphore(solvedSemaphore, SHARED_SOLVED_SAT_SEMAPHORE_NAME);
-        closeSharedMemory(sharedMemoryfd, SHARED_SAT_MEMORY_NAME);
+        closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
+        unmapSharedMemory(satStructs, satStructsSize);
+        closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
         exit(ERROR_FIFO_CREATION_FAIL);
     }
 
@@ -81,8 +92,9 @@ int main(int argc, char **argv) {
     int pipefd = open(SHARED_PIPE_SAT_NPIPE_FILE, O_RDWR);
     if (pipefd == -1) {
         perror("Could not open named pipe: ");
-        closeSemaphore(solvedSemaphore, SHARED_SOLVED_SAT_SEMAPHORE_NAME);
-        closeSharedMemory(sharedMemoryfd, SHARED_SAT_MEMORY_NAME);
+        closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
+        unmapSharedMemory(satStructs, satStructsSize);
+        closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
         exit(ERROR_FIFO_CREATION_FAIL);
     }
 
@@ -90,14 +102,16 @@ int main(int argc, char **argv) {
     int outfd = open(OUT_FILE, O_CREAT | O_RDONLY, READ_AND_WRITE_PERM);
     if (outfd == -1) {
         perror("Could not create output file: ");
-        closeSemaphore(solvedSemaphore, SHARED_SOLVED_SAT_SEMAPHORE_NAME);
-        closeSharedMemory(sharedMemoryfd, SHARED_SAT_MEMORY_NAME);
+        closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
+        unmapSharedMemory(satStructs, satStructsSize);
+        closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
         closePipe(pipefd);
         exit(ERROR_FILE_OPEN_FAIL);
     }
 
-    // No se si esto o PID. Es para que lo reciba la app vista
-    printf(SHARED_SAT_MEMORY_NAME);
+    // Para proceso Vista
+    // sleep(2)
+    printf("%lun", pid);
 
     int slavesQuantity = getSlavesQuantity(filesSize);
     char **files = argv + 1;
@@ -110,7 +124,7 @@ int main(int argc, char **argv) {
             // error
         } else {
             // Hijo --> Instanciar cada slave (ver enunciado)
-            char *arguments[3] = {SHARED_PIPE_SAT_NPIPE_FILE, SHARED_SOLVED_SAT_SEMAPHORE_NAME, NULL};
+            char *arguments[2] = {SHARED_PIPE_SAT_NPIPE_FILE, NULL};
             execvp("./slave.out", arguments);
         }
     }
@@ -124,11 +138,12 @@ int main(int argc, char **argv) {
         sem_wait(solvedSemaphore);
     }
 
-    closeSemaphore(solvedSemaphore, SHARED_SOLVED_SAT_SEMAPHORE_NAME);
-    closeSharedMemory(sharedMemoryfd, SHARED_SAT_MEMORY_NAME);
+    closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
+    unmapSharedMemory(satStructs, satStructsSize);
+    closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
     closePipe(pipefd);
 
-    saveFile(outfd, filesSize, map);
+    saveFile(outfd, filesSize, satStructs);
     close(outfd);
 
     exit(0);
@@ -142,21 +157,9 @@ int getMinFilesQuantity(int filesSize){
     return min(floor(filesSize * FILES_MIN_PERCENTAGE), floor(FILES_PER_SLAVE/2));
 }
 
-void saveFile(int fd, int count, SatStruct *satStruct) {
+void saveFile(int fd, int count, SatStruct *satStructs) {
     dprintf(fd, "TP1 - MINISAT output for %d files\n", count);
     for (int i = 0; i < count; i++) {
-        dprintf(fd, 
-            "Filename: %s\n"
-             "Clauses: %d\n"
-             "Variables: %d\n"
-             "Satisfiable: %s\n"
-             "Processing time: %ld\n"
-             "Processed by Slave ID: %d\n\n", 
-            satStruct->filename,
-            satStruct->clauses,
-            satStruct->variables,
-            satStruct->isSat == 0 ? "UNSAT" : "SAT",
-            satStruct->processingTime,
-            satStruct->processedBySlaveID);
+        dumpResults(fd, satStructs + i);
     }
 }
