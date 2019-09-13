@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/time.h>
+#include <sys/select.h>
 #include "utils/utils.h"
 #include "utils/satStruct.h"
 #include "application.h"
@@ -111,7 +113,7 @@ int main(int argc, char **argv) {
 
     // Para proceso Vista
     // sleep(2)
-    printf("%lun", pid);
+    printf("%lu", pid);
 
     int slavesQuantity = getSlavesQuantity(filesSize);
     char **files = argv + 1;
@@ -133,9 +135,15 @@ int main(int argc, char **argv) {
     // Aca tenemos que esperar a que haya datos. Para esto, solo podemos hacer un wait y esperar a un post.
     // Ni idea como hacer esto despues
     char inBuffer[PIPE_IN_BUFFER_SIZE] = {0};
+    fd_set readfds;
+    FD_SET(fd, readfds);
     while (satFinished < filesSize) {
-        // Tenemos que ir llenando el buffer
-        sem_wait(solvedSemaphore);
+        int ready = select(slavesQuantity, &readfds, NULL, NULL, NULL);
+        if (ready == -1) {
+            // ERROR
+        } else if (ready != 0) {
+            // PROCESS
+        }
     }
 
     closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
