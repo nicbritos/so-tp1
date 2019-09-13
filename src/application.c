@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <string.h>
 #include "utils/utils.h"
 #include "utils/satStruct.h"
 #include "application.h"
@@ -111,12 +112,23 @@ int main(int argc, char **argv) {
 
     // Para proceso Vista
     // sleep(2)
-    printf("%lun", pid);
+    printf("%lu\n", pid);
 
     int slavesQuantity = getSlavesQuantity(filesSize);
+    int digitQuantity = digits(slavesQuantity);
+    int baseLength = strlen(SHARED_PIPE_SAT_NPIPE_FILE);
     char **files = argv + 1;
     int satFinished = 0;
+
     for (int i = 0; i < slavesQuantity; i++) {
+        char * pipeName = malloc(sizeof(*pipeName) * (baseLength + digitQuantity + 1));
+        strcpy(pipeName, SHARED_PIPE_SAT_NPIPE_FILE);
+        sprintf(pipeName + baseLength + digitQuantity - digits(i), "%d", i);
+        for (int j = 0; j < digitQuantity - digits(i); j++)
+        {
+            pipeName[baseLength + j] = '0';
+        }
+        printf("%s\n", pipeName);
         int forkResult = fork();
         if (forkResult > 0) {
             // Padre -- No hace nada
@@ -125,7 +137,7 @@ int main(int argc, char **argv) {
         } else {
             // Hijo --> Instanciar cada slave (ver enunciado)
             char *arguments[2] = {SHARED_PIPE_SAT_NPIPE_FILE, NULL};
-            execvp("./slave.out", arguments);
+            execvp("./src/slave", arguments);
         }
     }
 
@@ -133,11 +145,10 @@ int main(int argc, char **argv) {
     // Aca tenemos que esperar a que haya datos. Para esto, solo podemos hacer un wait y esperar a un post.
     // Ni idea como hacer esto despues
     char inBuffer[PIPE_IN_BUFFER_SIZE] = {0};
-    while (satFinished < filesSize) {
-        // Tenemos que ir llenando el buffer
-        sem_wait(solvedSemaphore);
-    }
-
+    // while (satFinished < filesSize) {
+    //     // Tenemos que ir llenando el buffer
+    //     sem_wait(solvedSemaphore);
+    // }
     closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
     unmapSharedMemory(satStructs, satStructsSize);
     closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
@@ -160,6 +171,6 @@ int getMinFilesQuantity(int filesSize){
 void saveFile(int fd, int count, SatStruct *satStructs) {
     dprintf(fd, "TP1 - MINISAT output for %d files\n", count);
     for (int i = 0; i < count; i++) {
-        dumpResults(fd, satStructs + i);
+        //dumpResults(fd, satStructs + i);
     }
 }
