@@ -58,11 +58,16 @@ int main(int argc, char **argv) {
     // Print available data
     SatStruct *satStruct = NULL;
     int count = 0;
-    while (1) {
+    int finished = 0;
+    while (!finished) {
         sem_wait(solvedSemaphore);
         satStruct = getNextSatStruct(satStruct, sharedMemoryfd, count);
-        printResults(satStruct);
-        count++;
+        if (satStruct->filename != NULL) {
+            printResults(satStruct);
+            count++;
+        } else {
+            finished = 1;
+        }
     }
 
     closeSemaphore(solvedSemaphore);
