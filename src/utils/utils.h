@@ -22,4 +22,6 @@ void unmapSharedMemory(void *addr, size_t length);
 
 int min(int a, int b);
 
+int digits(int n);
+
 #endif
