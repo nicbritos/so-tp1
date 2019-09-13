@@ -26,6 +26,7 @@
 #define FILES_MIN_PERCENTAGE 0.05 
 #define MAX_SHARED_MEMORY_NAME_LENGTH 256
 #define MAX_SEMAPHORE_NAME_LENGTH 256
+#define MAX_SLAVES 512 // Solves problem of "Too many files open"
 
 #define ERROR_NO 0
 #define ERROR_NO_FILES -1
@@ -56,14 +57,14 @@ int main(int argc, char **argv) {
     }
 
     //Reserve storage for shared memory
-    if (ftruncate(sharedMemoryfd, sizeof(SatStruct) * filesSize) == -1) {
+    size_t satStructsSize = sizeof(SatStruct) * (filesSize + 1); // One more for the terminating struct
+    if (ftruncate(sharedMemoryfd, satStructsSize) == -1) {
         perror("Could not expand shared memory object: ");
         closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
         exit(ERROR_FTRUNCATE_FAIL);
     }
 
     //Map the shared memory
-    size_t satStructsSize = sizeof(SatStruct) * filesSize;
     SatStruct *satStructs = (SatStruct*) mmap(NULL, satStructsSize, PROT_READ | PROT_WRITE, MAP_SHARED, sharedMemoryfd, 0);
     if (satStructs == NULL) {
         perror("Could not map shared memory: ");
@@ -80,25 +81,6 @@ int main(int argc, char **argv) {
         unmapSharedMemory(satStructs, satStructsSize);
         closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
         exit(ERROR_SEMOPEN_FAIL);
-    }
-
-    // Create FIFO (named pipe)
-    if (mkfifo(SHARED_PIPE_SAT_NPIPE_FILE, READ_AND_WRITE_PERM) == -1) {
-        perror("Could not create named pipe: ");
-        closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
-        unmapSharedMemory(satStructs, satStructsSize);
-        closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
-        exit(ERROR_FIFO_CREATION_FAIL);
-    }
-
-    // Open the FIFO 
-    int pipefd = open(SHARED_PIPE_SAT_NPIPE_FILE, O_RDWR);
-    if (pipefd == -1) {
-        perror("Could not open named pipe: ");
-        closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
-        unmapSharedMemory(satStructs, satStructsSize);
-        closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
-        exit(ERROR_FIFO_CREATION_FAIL);
     }
 
     //Create the output file
@@ -120,43 +102,70 @@ int main(int argc, char **argv) {
     int digitQuantity = digits(slavesQuantity);
     int baseLength = strlen(SHARED_PIPE_SAT_NPIPE_FILE);
     char **files = argv + 1;
+    int filesSent = 0;
     int satFinished = 0;
-
+    char *pipeNames[slavesQuantity];
+    int *pipesfds[slavesQuantity];
+    fd_set readfds;
+    FD_ZERO(&readfds);
     for (int i = 0; i < slavesQuantity; i++) {
-        char * pipeName = malloc(sizeof(*pipeName) * (baseLength + digitQuantity + 1));
+        // Create Pipe Name
+        char *pipeName = malloc(sizeof(*pipeName) * (baseLength + digitQuantity + 1));
         strcpy(pipeName, SHARED_PIPE_SAT_NPIPE_FILE);
         sprintf(pipeName + baseLength + digitQuantity - digits(i), "%d", i);
-        for (int j = 0; j < digitQuantity - digits(i); j++)
-        {
+        for (int j = 0; j < digitQuantity - digits(i); j++) {
             pipeName[baseLength + j] = '0';
         }
-        printf("%s\n", pipeName);
+
         int forkResult = fork();
         if (forkResult > 0) {
-            // Padre -- No hace nada
+            // Padre
+            int fd = createAndOpenPipe();
+            if (fd == -1) {
+                // Error. TERMINAR
+            }
+            FD_SET(fd, &readfds);
+            pipeNames[i] = pipeName;
+            pipesfds[i] = fd;
+
+            sendFile(fd, files, &filesSent);
+            sendFile(fd, files, &filesSent);
         } else if (forkResult == -1) {
-            // error
+            // error. TERMINAR
         } else {
             // Hijo --> Instanciar cada slave (ver enunciado)
             char *arguments[2] = {SHARED_PIPE_SAT_NPIPE_FILE, NULL};
-            execvp("./src/slave", arguments);
+            if (execvp("./src/slave", arguments) == -1) {
+                // Error. TERMINAR
+            }
         }
     }
 
-    // TODO: Idle processes when there are no more files to be processed
-    // Aca tenemos que esperar a que haya datos. Para esto, solo podemos hacer un wait y esperar a un post.
-    // Ni idea como hacer esto despues
-    char inBuffer[PIPE_IN_BUFFER_SIZE] = {0};
-    fd_set readfds;
-    FD_SET(fd, readfds);
     while (satFinished < filesSize) {
         int ready = select(slavesQuantity, &readfds, NULL, NULL, NULL);
         if (ready == -1) {
             // ERROR
         } else if (ready != 0) {
-            // PROCESS
+            for (int i = 0; i < slavesQuantity; i++) {
+                int fd = pipesfds[i];
+
+                if (FD_ISSET(fd, &readfds)) {
+                    FD_CLR(fd, &readfds);
+
+                    processInput(fd, satStructs, satFinished++);
+                    if (filesSent < filesSize) {
+                        sendFile(fd, files, &filesSent);
+                    } else {
+                        terminateSlave(fd);
+                    }
+                    sem_post(solvedSemaphore);
+                }
+            }
         }
     }
+
+    terminateView(satStructs, satFinished, solvedSemaphore);
+
     closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
     unmapSharedMemory(satStructs, satStructsSize);
     closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
@@ -169,7 +178,7 @@ int main(int argc, char **argv) {
 }
 
 int getSlavesQuantity(int filesSize) {
-    return ceil(filesSize / FILES_PER_SLAVE);
+    return min(ceil(filesSize / FILES_PER_SLAVE), MAX_SLAVES);
 }
 
 int getMinFilesQuantity(int filesSize){
@@ -179,6 +188,55 @@ int getMinFilesQuantity(int filesSize){
 void saveFile(int fd, int count, SatStruct *satStructs) {
     dprintf(fd, "TP1 - MINISAT output for %d files\n", count);
     for (int i = 0; i < count; i++) {
-        //dumpResults(fd, satStructs + i);
+        dumpResults(fd, satStructs + i);
     }
+}
+
+int createAndOpenPipe(char *name) {
+    // Create FIFO (named pipe)
+    if (mkfifo(name, READ_AND_WRITE_PERM) == -1) {
+        perror("Could not create named pipe: ");
+        closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
+        unmapSharedMemory(satStructs, satStructsSize);
+        closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
+        exit(ERROR_FIFO_CREATION_FAIL);
+    }
+
+    // Open the FIFO 
+    int pipefd = open(name, O_RDWR);
+    if (pipefd == -1) {
+        perror("Could not open named pipe: ");
+        closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
+        unmapSharedMemory(satStructs, satStructsSize);
+        closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
+        exit(ERROR_FIFO_CREATION_FAIL);
+    }
+
+    return pipefd;
+}
+
+void sendFile(int fd, char *str, int *filesSent) {
+    write(fd, files[*filesSent], strlen(files[*filesSent]) + 1);
+    (*filesSent)++;
+}
+
+// TODO: UTILS.C
+void processInput(int fd, SatStruct *satStructs, int index) {
+    char buf[1] = {NULL};
+    SatStruct satStruct = satStructs + index;
+    while (read(fd, buf, 1) == 1) {
+        // foo.cnf\n123\n45\n1\n67
+    }
+
+    read
+}
+
+void terminateSlave(int fd) {
+    write(fd, NULL, 1);
+}
+
+void terminateView(SatStruct *satStructs, int count, sem_t *solvedSemaphore) {
+    SatStruct satStruct = satStructs + count;
+    satStruct->filename = NULL;
+    sem_post(solvedSemaphore);
 }
