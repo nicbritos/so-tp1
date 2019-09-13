@@ -10,6 +10,7 @@
 #include <sys/wait.h>
 #include <sys/time.h>
 #include <sys/select.h>
+#include <string.h>
 #include "utils/utils.h"
 #include "utils/satStruct.h"
 #include "application.h"
@@ -116,9 +117,20 @@ int main(int argc, char **argv) {
     printf("%lu", pid);
 
     int slavesQuantity = getSlavesQuantity(filesSize);
+    int digitQuantity = digits(slavesQuantity);
+    int baseLength = strlen(SHARED_PIPE_SAT_NPIPE_FILE);
     char **files = argv + 1;
     int satFinished = 0;
+
     for (int i = 0; i < slavesQuantity; i++) {
+        char * pipeName = malloc(sizeof(*pipeName) * (baseLength + digitQuantity + 1));
+        strcpy(pipeName, SHARED_PIPE_SAT_NPIPE_FILE);
+        sprintf(pipeName + baseLength + digitQuantity - digits(i), "%d", i);
+        for (int j = 0; j < digitQuantity - digits(i); j++)
+        {
+            pipeName[baseLength + j] = '0';
+        }
+        printf("%s\n", pipeName);
         int forkResult = fork();
         if (forkResult > 0) {
             // Padre -- No hace nada
@@ -127,7 +139,7 @@ int main(int argc, char **argv) {
         } else {
             // Hijo --> Instanciar cada slave (ver enunciado)
             char *arguments[2] = {SHARED_PIPE_SAT_NPIPE_FILE, NULL};
-            execvp("./slave.out", arguments);
+            execvp("./src/slave", arguments);
         }
     }
 
@@ -145,7 +157,6 @@ int main(int argc, char **argv) {
             // PROCESS
         }
     }
-
     closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
     unmapSharedMemory(satStructs, satStructsSize);
     closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
@@ -168,6 +179,6 @@ int getMinFilesQuantity(int filesSize){
 void saveFile(int fd, int count, SatStruct *satStructs) {
     dprintf(fd, "TP1 - MINISAT output for %d files\n", count);
     for (int i = 0; i < count; i++) {
-        dumpResults(fd, satStructs + i);
+        //dumpResults(fd, satStructs + i);
     }
 }

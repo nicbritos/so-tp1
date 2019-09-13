@@ -7,7 +7,6 @@ EXECUTABLE=tp1
 all: application slave view
 
 application: compile $(OBJECTS)
-
 	$(CC) $(OBJECTS) -o $(EXECUTABLE) $(CFLAGS)
 
 slave: src/slave.o src/utils/utils.o
@@ -31,4 +30,4 @@ src/view.o:
 	$(CC) -c src/view.c -o src/view.o $(CFLAGS)
 
 clean:
-	rm $(OBJECTS) src/slave.o src/slave ${EXECUTABLE}
+	rm $(OBJECTS) src/view.o src/view src/slave.o src/slave ${EXECUTABLE}
