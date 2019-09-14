@@ -22,6 +22,8 @@ void unmapSharedMemory(void *addr, size_t length);
 
 int min(int a, int b);
 
-int digits(int n);
+int digits(long n);
+
+char *readFromFile(int fd);
 
 #endif

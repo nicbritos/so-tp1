@@ -5,6 +5,8 @@
 #include <fcntl.h>
 #include "utils.h"
 
+#define CHUNK 5
+
 void printError(char *s) {
     fprintf(stderr, "%s\n", s);
 }
@@ -56,7 +58,7 @@ int min(int a, int b){
 	return (a<b)?a:b;
 }
 
-int digits(int n){
+int digits(long n){
     if(n == 0)
         return 1;
     int ans = 0;
@@ -65,4 +67,25 @@ int digits(int n){
         n/=10; 
     }
     return ans;
+}
+
+char *readFromFile(int fd) {
+    int n = 0, current = 0;
+    char *out = malloc(sizeof(*out) * (CHUNK));
+    while ((current = read(fd, out + n, CHUNK)) == CHUNK) {
+        n += CHUNK;
+        out = realloc(out, sizeof(*out) * (CHUNK + n));
+    }
+    n += current;
+    if (n == 0) {
+        free(out);
+        return NULL;
+    }
+    if (n % CHUNK == 0) {
+        out = realloc(out, sizeof(*out) * (CHUNK + ++n));
+    }
+    out[n] = '\0';
+
+    printf("%s\n", out);
+    return out;
 }

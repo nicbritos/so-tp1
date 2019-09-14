@@ -17,7 +17,7 @@
 
 #define SHARED_SAT_MEMORY_NAME "/tp1mem%lu"
 #define SHARED_SAT_DATA_SEMAPHORE_NAME "/tp1sem%lu"
-#define SHARED_PIPE_SAT_NPIPE_FILE "/tmp/tp1NamedPipe"
+#define SHARED_PIPE_SAT_NPIPE_FILE "/tmp/tp1Pipe"
 #define OUT_FILE "./tp1_output.txt"
 
 #define PIPE_IN_BUFFER_SIZE 4096
@@ -90,13 +90,12 @@ int main(int argc, char **argv) {
         closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
         unmapSharedMemory(satStructs, satStructsSize);
         closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
-        closePipe(pipefd);
         exit(ERROR_FILE_OPEN_FAIL);
     }
 
     // Para proceso Vista
     // sleep(2)
-    printf("%lu", pid);
+    printf("%lu\n", pid);
 
     int slavesQuantity = getSlavesQuantity(filesSize);
     int digitQuantity = digits(slavesQuantity);
@@ -120,9 +119,23 @@ int main(int argc, char **argv) {
         int forkResult = fork();
         if (forkResult > 0) {
             // Padre
-            int fd = createAndOpenPipe();
+            // Create FIFO (named pipe)
+            if (mkfifo(pipeName, READ_AND_WRITE_PERM) == -1) {
+                perror("Could not create named pipe: ");
+                // closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
+                // unmapSharedMemory(satStructs, satStructsSize);
+                // closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
+                exit(ERROR_FIFO_CREATION_FAIL);
+            }
+
+            // Open the FIFO 
+            int fd = open(pipeName, O_RDWR);
             if (fd == -1) {
-                // Error. TERMINAR
+                perror("Could not open named pipe: ");
+                // closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
+                // unmapSharedMemory(satStructs, satStructsSize);
+                // closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
+                exit(ERROR_FIFO_OPEN_FAIL);
             }
             FD_SET(fd, &readfds);
             pipeNames[i] = pipeName;
@@ -134,7 +147,9 @@ int main(int argc, char **argv) {
             // error. TERMINAR
         } else {
             // Hijo --> Instanciar cada slave (ver enunciado)
-            char *arguments[2] = {SHARED_PIPE_SAT_NPIPE_FILE, NULL};
+            char *slaveId = malloc(sizeof(*slaveId) * (digitQuantity + 1));
+            sprintf(slaveId, "%d", i);
+            char *arguments[3] = {pipeName, slaveId, NULL};
             if (execvp("./src/slave", arguments) == -1) {
                 // Error. TERMINAR
             }
@@ -142,17 +157,19 @@ int main(int argc, char **argv) {
     }
 
     while (satFinished < filesSize) {
+        printf("preselect\n");
         int ready = select(slavesQuantity, &readfds, NULL, NULL, NULL);
         if (ready == -1) {
-            // ERROR
+            printf("SELECT ERROR\n");
         } else if (ready != 0) {
+            printf("SELECT\n");
             for (int i = 0; i < slavesQuantity; i++) {
                 int fd = pipesfds[i];
 
                 if (FD_ISSET(fd, &readfds)) {
                     FD_CLR(fd, &readfds);
 
-                    processInput(fd, satStructs, satFinished++);
+                    processInput(fd, satStructs, "FALTA", satFinished++);
                     if (filesSent < filesSize) {
                         sendFile(fd, files, &filesSent);
                     } else {
@@ -169,7 +186,6 @@ int main(int argc, char **argv) {
     closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
     unmapSharedMemory(satStructs, satStructsSize);
     closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
-    closePipe(pipefd);
 
     saveFile(outfd, filesSize, satStructs);
     close(outfd);
@@ -192,51 +208,30 @@ void saveFile(int fd, int count, SatStruct *satStructs) {
     }
 }
 
-int createAndOpenPipe(char *name) {
-    // Create FIFO (named pipe)
-    if (mkfifo(name, READ_AND_WRITE_PERM) == -1) {
-        perror("Could not create named pipe: ");
-        closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
-        unmapSharedMemory(satStructs, satStructsSize);
-        closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
-        exit(ERROR_FIFO_CREATION_FAIL);
-    }
-
-    // Open the FIFO 
-    int pipefd = open(name, O_RDWR);
-    if (pipefd == -1) {
-        perror("Could not open named pipe: ");
-        closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
-        unmapSharedMemory(satStructs, satStructsSize);
-        closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
-        exit(ERROR_FIFO_CREATION_FAIL);
-    }
-
-    return pipefd;
-}
-
 void sendFile(int fd, char *str, int *filesSent) {
-    write(fd, files[*filesSent], strlen(files[*filesSent]) + 1);
+    write(fd, str, strlen(str));
     (*filesSent)++;
 }
 
-// TODO: UTILS.C
-void processInput(int fd, SatStruct *satStructs, int index) {
-    char buf[1] = {NULL};
-    SatStruct satStruct = satStructs + index;
-    while (read(fd, buf, 1) == 1) {
-        // foo.cnf\n123\n45\n1\n67
-    }
+// TODO: UTILS.C ?
+void processInput(int fd, SatStruct *satStructs, char *fileName, int index) {
+    SatStruct *satStruct = satStructs + index;
+    char *data = readFromFile(fd);
+    printf(data);
+    int vars, clauses, sat;
+    long cpuTime;
+    scanf(data, "%d\n%d\n%ld\n%d", &(satStruct->variables), &(satStruct->clauses), &(satStruct->processingTime), &(satStruct->isSat));
 
-    read
+    satStruct->filename = fileName;
+    satStruct->processedBySlaveID = -1;
 }
 
 void terminateSlave(int fd) {
-    write(fd, NULL, 1);
+    write(fd, "", 1);
 }
 
 void terminateView(SatStruct *satStructs, int count, sem_t *solvedSemaphore) {
-    SatStruct satStruct = satStructs + count;
+    SatStruct *satStruct = satStructs + count;
     satStruct->filename = NULL;
     sem_post(solvedSemaphore);
 }

@@ -7,15 +7,18 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include "slave.h"
 #include "utils/utils.h"
 #include "utils/satStruct.h"
+
+#define SHARED_PIPE_SAT_NPIPE_FILE "/tmp/tp1%lu"
 
 #define READ_AND_WRITE_PERM 0666
 
 #define MAXSIZE 80
  
 #define ERROR_NO 0
-#define ERROR_NO_FILES -1
+#define ERROR_NOT_ENOUGH_ARGUMENTS -1
 #define ERROR_SHMOPEN_FAIL -2
 #define ERROR_FTRUNCATE_FAIL -3
 #define ERROR_MMAP_FAIL -4
@@ -25,21 +28,55 @@
 #define ERROR_FILE_OPEN_FAIL -8
 
 int main(int argc, char **argv) {
+    if (argc < 2) {
+        printError("Not enough arguments.");
+        exit(ERROR_NOT_ENOUGH_ARGUMENTS);
+    }
 
-	char * filePath = "cnf/uuf100-0990.cnf"; //VA A SER VARIABLE
-	char * command = malloc(MAXSIZE + strlen(filePath) + 1);
-	sprintf(command, "%s %s | %s","minisat", filePath, "egrep \"Number of|CPU|SAT\" | egrep -o \"[0-9]+\\.?[0-9]*|(UN)?SAT\"");
-    FILE * output = popen(command, "r");
-    int vars, clauses, cpuTime, isSat;
-    char sat[6]; //UNSAT + \0
-    
-    fscanf(output, "%d\n%d\n%d\n%s\n", &vars, &clauses, &cpuTime, sat);
-    isSat = (sat[0] == 'U')?0:(sat[0] == 'S')?1:-1;
-    
+    char *pipeName = argv[0];
+    long slaveId = atol(argv[1]);
 
-    printf("%d\n%d\n%d\n%d\n", vars, clauses, cpuTime, isSat);
+    int pipefd = open(pipeName, O_RDWR);
+    if (pipefd == -1) {
+        perror("Could not open named pipe: ");
+        exit(ERROR_FIFO_OPEN_FAIL);
+    }
 
-    free(command);
-    pclose(output);
+    char *filepath = NULL;
+    while ((filepath = readFilepath(pipefd, filepath)) != NULL) {
+        processFile(pipefd, filepath);
+    }
+
+    close(pipefd);
     exit(ERROR_NO);
+}
+
+char *readFilepath(int pipefd, char *oldFilepath) {
+    if (oldFilepath != NULL)
+        free(oldFilepath);
+
+    return readFromFile(pipefd);
+}
+
+void processFile(int pipefd, char *filepath) {
+    char *command = malloc(MAXSIZE + strlen(filepath) + 1);
+    sprintf(command, "%s %s | %s","minisat", filepath, "egrep \"Number of|CPU|SAT\" | egrep -o \"[0-9]+\\.?[0-9]*|(UN)?SAT\"");
+    FILE *output = popen(command, "r");
+    free(command);
+
+    int vars, clauses, isSat;
+    long cpuTime;
+    char sat[6]; //UNSAT + \0
+    fscanf(output, "%d\n%d\n%ld\n%s\n", &vars, &clauses, &cpuTime, sat);
+    isSat = (sat[0] == 'U')?0:(sat[0] == 'S')?1:-1;
+    pclose(output);
+
+    char *solutionData = malloc(sizeof(*solutionData) * (digits(vars) + 1 + digits(clauses) + 1 + digits(cpuTime) + 1 + 2));
+    sprintf(solutionData, "%d\n%d\n%ld\n%d", vars, clauses, cpuTime, sat);
+    sendSolution(pipefd, solutionData);
+    free(solutionData);
+}
+
+void sendSolution(int pipefd, char *solution) {
+    write(pipefd, solution, strlen(solution) + 1);
 }
