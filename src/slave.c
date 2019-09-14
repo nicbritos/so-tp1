@@ -33,8 +33,8 @@ int main(int argc, char **argv) {
         exit(ERROR_NOT_ENOUGH_ARGUMENTS);
     }
 
-    char *pipeName = argv[0];
-    long slaveId = atol(argv[1]);
+    char *pipeName = argv[1];
+    long slaveId = atol(argv[2]);
 
     int pipefd = open(pipeName, O_RDWR);
     if (pipefd == -1) {
