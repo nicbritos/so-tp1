@@ -32,12 +32,12 @@ int main(int argc, char **argv) {
         exit(ERROR_NOT_ENOUGH_ARGUMENTS);
     }
 
-    char *readPipeName = argv[1];
-    char *writePipeName = argv[2];
-    char *semaphoreName = argv[3];
+    char *readPipeName = argv[0];
+    char *writePipeName = argv[1];
+    char *semaphoreName = argv[2];
 
     // Tiene que estar en el mismo orden que en el Application!!!!
-    int readPipefd = open(readPipeName, O_RDONLY);
+    int readPipefd = open(readPipeName, O_RDONLY | O_NONBLOCK);
     if (readPipefd == -1) {
         perror("Could not open named pipe: ");
         exit(ERROR_FIFO_OPEN_FAIL);
@@ -47,7 +47,7 @@ int main(int argc, char **argv) {
         perror("Could not open named pipe: ");
         exit(ERROR_FIFO_OPEN_FAIL);
     }
-    sem_t *semaphore = sem_open(semaphoreName, O_RDONLY);
+    sem_t *semaphore = sem_open(semaphoreName, O_RDWR);
     if (semaphore == SEM_FAILED) {
         perror("Could not open shared semaphore");
         exit(ERROR_SEMOPEN_FAIL);

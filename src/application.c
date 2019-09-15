@@ -134,14 +134,12 @@ void sendFile(int fd, char *fileName, long fileIndex) {
     char *data = malloc(sizeof(*data) * (fileNameLength + 1 + fileIndexDigits + 1));
     sprintf(data, "%s\n%ld", fileName, fileIndex);
     write(fd, data, fileNameLength + fileIndexDigits + 1);
-    printf("Sent: %s\n", fileName);
     free(data);
 }
 
 void processInput(int fd, SatStruct *satStruct, char **files, int slaveId) {
     long fileIndex;
     char *data = readFromFile(fd);
-    printf("%s\n", data);
     sscanf(data, "%d\n%d\n%f\n%d\n%ld\n", &(satStruct->variables), &(satStruct->clauses), &(satStruct->processingTime), &(satStruct->isSat), &fileIndex);
     free(data);
 
@@ -211,7 +209,7 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
     }
 
     // Create the output file
-    appStruct->outputfd = open(OUT_FILE, O_CREAT | O_RDWR, READ_AND_WRITE_PERM);
+    appStruct->outputfd = open(OUT_FILE, O_CREAT | O_WRONLY, READ_AND_WRITE_PERM);
     if (appStruct->outputfd == -1) {
         perror("Could not create output file");
         shutdown(appStruct, ERROR_FILE_OPEN_FAIL);
@@ -283,7 +281,7 @@ void initializeSlaves(AppStruct *appStruct) {
             }
 
             // Open FIFO
-            slaveStruct->readPipefd = open(slaveStruct->readPipeName, O_RDONLY);
+            slaveStruct->readPipefd = open(slaveStruct->readPipeName, O_RDONLY | O_NONBLOCK);
             if (slaveStruct->readPipefd == -1) {
                 perror("Could not open named pipe");
                 shutdown(appStruct, ERROR_FIFO_OPEN_FAIL);
@@ -298,10 +296,7 @@ void initializeSlaves(AppStruct *appStruct) {
             shutdown(appStruct, ERROR_FIFO_OPEN_FAIL);
         } else {
             // Hijo --> Instanciar cada slave (ver enunciado)
-
-            char *slaveId = malloc(sizeof(*slaveId) * (slavesQuantityDigits + 1));
-            sprintf(slaveId, "%d", i);
-            char *arguments[5] = {slaveStruct->writePipeName, slaveStruct->writePipeName, slaveStruct->readPipeName, slaveStruct->fileAvailableSemaphoreName, NULL};
+            char *arguments[4] = {slaveStruct->writePipeName, slaveStruct->readPipeName, slaveStruct->fileAvailableSemaphoreName, NULL};
             if (execvp("./src/slave", arguments) == -1) {
                 printf("Error slave\n");
                 exit(1);
