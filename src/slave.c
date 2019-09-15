@@ -28,26 +28,33 @@
 #define ERROR_FILE_OPEN_FAIL -8
 
 int main(int argc, char **argv) {
-    if (argc < 2) {
+    if (argc < 3) {
         printError("Not enough arguments.");
         exit(ERROR_NOT_ENOUGH_ARGUMENTS);
     }
 
-    char *pipeName = argv[1];
+    char *readPipeName = argv[0];
+    char *writePipeName = argv[1];
     long slaveId = atol(argv[2]);
 
-    int pipefd = open(pipeName, O_RDWR);
-    if (pipefd == -1) {
+    int writePipefd = open(writePipeName, O_WRONLY);
+    if (writePipefd == -1) {
+        perror("Could not open named pipe: ");
+        exit(ERROR_FIFO_OPEN_FAIL);
+    }
+    int readPipefd = open(readPipeName, O_RDONLY);
+    if (readPipefd == -1) {
         perror("Could not open named pipe: ");
         exit(ERROR_FIFO_OPEN_FAIL);
     }
 
     char *filepath = NULL;
-    while ((filepath = readFilepath(pipefd, filepath)) != NULL) {
-        processFile(pipefd, filepath);
+    while ((filepath = readFilepath(readPipefd, filepath)) != NULL) {
+        processFile(writePipefd, filepath);
     }
 
-    close(pipefd);
+    close(writePipefd);
+    close(readPipefd);
     exit(ERROR_NO);
 }
 

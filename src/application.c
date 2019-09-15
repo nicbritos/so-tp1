@@ -17,11 +17,14 @@
 
 #define SHARED_SAT_MEMORY_NAME "/tp1mem%lu"
 #define SHARED_SAT_DATA_SEMAPHORE_NAME "/tp1sem%lu"
-#define SHARED_PIPE_SAT_NPIPE_FILE "/tmp/tp1Pipe"
+#define SHARED_PIPE_SAT_WRITE_FILE "/tmp/tp1PipeW"
+#define SHARED_PIPE_SAT_READ_FILE "/tmp/tp1PipeR"
 #define OUT_FILE "./tp1_output.txt"
 
 #define PIPE_IN_BUFFER_SIZE 4096
 #define READ_AND_WRITE_PERM 0666
+#define WRITE_PERM 0444
+#define READ_PERM 0222
 #define FILES_PER_SLAVE 10.0
 #define FILES_MIN_PERCENTAGE 0.05 
 #define MAX_SHARED_MEMORY_NAME_LENGTH 256
@@ -99,28 +102,45 @@ int main(int argc, char **argv) {
 
     int slavesQuantity = getSlavesQuantity(filesSize);
     int digitQuantity = digits(slavesQuantity);
-    int baseLength = strlen(SHARED_PIPE_SAT_NPIPE_FILE);
+    int writePipeNameLength = strlen(SHARED_PIPE_SAT_WRITE_FILE);
+    int readPipeNameLength = strlen(SHARED_PIPE_SAT_READ_FILE);
     char **files = argv + 1;
     int filesSent = 0;
     int satFinished = 0;
-    char *pipeNames[slavesQuantity];
-    int *pipesfds[slavesQuantity];
+    char *writePipeNames[slavesQuantity];
+    char *readPipeNames[slavesQuantity];
+    int *writePipesfds[slavesQuantity];
+    int *readPipesfds[slavesQuantity];
     fd_set readfds;
     FD_ZERO(&readfds);
     for (int i = 0; i < slavesQuantity; i++) {
-        // Create Pipe Name
-        char *pipeName = malloc(sizeof(*pipeName) * (baseLength + digitQuantity + 1));
-        strcpy(pipeName, SHARED_PIPE_SAT_NPIPE_FILE);
-        sprintf(pipeName + baseLength + digitQuantity - digits(i), "%d", i);
+        // Create Pipes Name
+        char *writePipeName = malloc(sizeof(*writePipeName) * (writePipeNameLength + digitQuantity + 1));
+        strcpy(writePipeName, SHARED_PIPE_SAT_WRITE_FILE);
+        sprintf(writePipeName + writePipeNameLength + digitQuantity - digits(i), "%d", i);
         for (int j = 0; j < digitQuantity - digits(i); j++) {
-            pipeName[baseLength + j] = '0';
+            writePipeName[writePipeNameLength + j] = '0';
+        }
+        char *readPipeName = malloc(sizeof(*readPipeName) * (readPipeNameLength + digitQuantity + 1));
+        strcpy(readPipeName, SHARED_PIPE_SAT_READ_FILE);
+        sprintf(readPipeName + readPipeNameLength + digitQuantity - digits(i), "%d", i);
+        for (int j = 0; j < digitQuantity - digits(i); j++) {
+            readPipeName[readPipeNameLength + j] = '0';
         }
 
         int forkResult = fork();
         if (forkResult > 0) {
             // Padre
             // Create FIFO (named pipe)
-            if (mkfifo(pipeName, READ_AND_WRITE_PERM) == -1) {
+            if (mkfifo(writePipeName, READ_AND_WRITE_PERM) == -1) {
+                perror("Could not create named pipe: ");
+                // closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
+                // unmapSharedMemory(satStructs, satStructsSize);
+                // closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
+                exit(ERROR_FIFO_CREATION_FAIL);
+            }
+            // Create FIFO (named pipe)
+            if (mkfifo(readPipeName, READ_AND_WRITE_PERM) == -1) {
                 perror("Could not create named pipe: ");
                 // closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
                 // unmapSharedMemory(satStructs, satStructsSize);
@@ -129,27 +149,37 @@ int main(int argc, char **argv) {
             }
 
             // Open the FIFO 
-            int fd = open(pipeName, O_RDWR);
-            if (fd == -1) {
+            int writefd = open(writePipeName, O_WRONLY);
+            if (writefd == -1) {
                 perror("Could not open named pipe: ");
                 // closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
                 // unmapSharedMemory(satStructs, satStructsSize);
                 // closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
                 exit(ERROR_FIFO_OPEN_FAIL);
             }
-            FD_SET(fd, &readfds);
-            pipeNames[i] = pipeName;
-            pipesfds[i] = fd;
+            int readfd = open(readPipeName, O_RDONLY);
+            if (readfd == -1) {
+                perror("Could not open named pipe: ");
+                // closeMasterSemaphore(solvedSemaphore, sharedSemaphoreName);
+                // unmapSharedMemory(satStructs, satStructsSize);
+                // closeMasterSharedMemory(sharedMemoryfd, sharedMemoryName);
+                exit(ERROR_FIFO_OPEN_FAIL);
+            }
+            FD_SET(readfd, &readfds);
+            writePipeNames[i] = writePipeName;
+            readPipeNames[i] = readPipeName;
+            writePipesfds[i] = writefd;
+            readPipesfds[i] = readfd;
 
-            sendFile(fd, files, &filesSent);
-            sendFile(fd, files, &filesSent);
+            sendFile(writefd, files, &filesSent);
+            sendFile(writefd, files, &filesSent);
         } else if (forkResult == -1) {
             // error. TERMINAR
         } else {
             // Hijo --> Instanciar cada slave (ver enunciado)
             char *slaveId = malloc(sizeof(*slaveId) * (digitQuantity + 1));
             sprintf(slaveId, "%d", i);
-            char *arguments[3] = {pipeName, slaveId, NULL};
+            char *arguments[4] = {writePipeName, readPipeName, slaveId, NULL};
             if (execvp("./src/slave", arguments) == -1) {
                 // Error. TERMINAR
             }
@@ -164,16 +194,17 @@ int main(int argc, char **argv) {
         } else if (ready != 0) {
             printf("SELECT\n");
             for (int i = 0; i < slavesQuantity; i++) {
-                int fd = pipesfds[i];
+                int readfd = readPipesfds[i];
 
-                if (FD_ISSET(fd, &readfds)) {
-                    FD_CLR(fd, &readfds);
+                if (FD_ISSET(readfd, &readfds)) {
+                    FD_CLR(readfd, &readfds);
+                    int writefd = writePipesfds[i];
 
-                    processInput(fd, satStructs, "FALTA", satFinished++);
+                    processInput(readfd, satStructs, "FALTA", satFinished++);
                     if (filesSent < filesSize) {
-                        sendFile(fd, files, &filesSent);
+                        sendFile(writefd, files, &filesSent);
                     } else {
-                        terminateSlave(fd);
+                        terminateSlave(writefd);
                     }
                     sem_post(solvedSemaphore);
                 }
