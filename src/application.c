@@ -135,14 +135,15 @@ void sendFile(int fd, char *fileName, long fileIndex) {
     sprintf(data, "%s\n%ld", fileName, fileIndex);
     write(fd, data, fileNameLength + fileIndexDigits + 1);
     printf("Sent: %s\n", fileName);
-    // free(data);
+    free(data);
 }
 
 void processInput(int fd, SatStruct *satStruct, char **files, int slaveId) {
     long fileIndex;
     char *data = readFromFile(fd);
+    printf("%s\n", data);
     sscanf(data, "%d\n%d\n%f\n%d\n%ld\n", &(satStruct->variables), &(satStruct->clauses), &(satStruct->processingTime), &(satStruct->isSat), &fileIndex);
-    // free(data);
+    free(data);
 
     satStruct->fileName = files[fileIndex];
     satStruct->processedBySlaveID = slaveId;
@@ -203,7 +204,7 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
     // Create shared semaphore (View)
     appStruct->viewSemaphoreName = calloc(1, sizeof(char) * MAX_SEMAPHORE_NAME_LENGTH);
     snprintf(appStruct->viewSemaphoreName, MAX_SEMAPHORE_NAME_LENGTH, SHARED_SEMAPHORE_VIEW_FILE, pid);
-    appStruct->viewSemaphore = sem_open(appStruct->viewSemaphoreName, O_CREAT | O_RDWR);
+    appStruct->viewSemaphore = sem_open(appStruct->viewSemaphoreName, O_CREAT | O_RDWR, READ_AND_WRITE_PERM, 0);
     if (appStruct->viewSemaphore == SEM_FAILED) {
         perror("Could not create shared semaphore");
         shutdown(appStruct, ERROR_SEMOPEN_FAIL);
@@ -300,7 +301,7 @@ void initializeSlaves(AppStruct *appStruct) {
 
             char *slaveId = malloc(sizeof(*slaveId) * (slavesQuantityDigits + 1));
             sprintf(slaveId, "%d", i);
-            char *arguments[4] = {slaveStruct->writePipeName, slaveStruct->readPipeName, slaveStruct->fileAvailableSemaphoreName, NULL};
+            char *arguments[5] = {slaveStruct->writePipeName, slaveStruct->writePipeName, slaveStruct->readPipeName, slaveStruct->fileAvailableSemaphoreName, NULL};
             if (execvp("./src/slave", arguments) == -1) {
                 printf("Error slave\n");
                 exit(1);

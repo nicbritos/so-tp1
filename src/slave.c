@@ -12,8 +12,6 @@
 #include "utils/utils.h"
 #include "utils/satStruct.h"
 
-#define SHARED_PIPE_SAT_NPIPE_FILE "/tmp/tp1%lu"
-
 #define READ_AND_WRITE_PERM 0666
 
 #define MAXSIZE 80
@@ -34,9 +32,9 @@ int main(int argc, char **argv) {
         exit(ERROR_NOT_ENOUGH_ARGUMENTS);
     }
 
-    char *readPipeName = argv[0];
-    char *writePipeName = argv[1];
-    char *semaphoreName = argv[2];
+    char *readPipeName = argv[1];
+    char *writePipeName = argv[2];
+    char *semaphoreName = argv[3];
 
     // Tiene que estar en el mismo orden que en el Application!!!!
     int readPipefd = open(readPipeName, O_RDONLY);
@@ -49,7 +47,7 @@ int main(int argc, char **argv) {
         perror("Could not open named pipe: ");
         exit(ERROR_FIFO_OPEN_FAIL);
     }
-    sem_t *semaphore = sem_open(semaphoreName, O_RDWR);
+    sem_t *semaphore = sem_open(semaphoreName, O_RDONLY);
     if (semaphore == SEM_FAILED) {
         perror("Could not open shared semaphore");
         exit(ERROR_SEMOPEN_FAIL);
@@ -73,9 +71,12 @@ int main(int argc, char **argv) {
 
 char *readFilepath(int pipefd, char *oldFilepath, sem_t *semaphore, long *fileId) {
     if (oldFilepath != NULL) {
-        // free(oldFilepath);
+        free(oldFilepath);
     }
     // printf("Slave: waiting sem\n");
+    int val;
+    sem_getvalue(semaphore, &val);
+    printf("%d\n", val);
     sem_wait(semaphore);
 
     char *data = readFromFile(pipefd);
@@ -90,7 +91,7 @@ void processFile(int pipefd, char *filepath, long fileId) {
     char *command = malloc(MAXSIZE + strlen(filepath) + 1);
     sprintf(command, "%s %s | %s","minisat", filepath, "egrep \"Number of|CPU|SAT\" | egrep -o \"[0-9]+\\.?[0-9]*|(UN)?SAT\"");
     FILE *output = popen(command, "r");
-    // free(command);
+    free(command);
 
     int vars, clauses, isSat;
     float cpuTime;
@@ -99,11 +100,10 @@ void processFile(int pipefd, char *filepath, long fileId) {
     isSat = (sat[0] == 'U')?0:(sat[0] == 'S')?1:-1;
     pclose(output);
 
-    char *solutionData = malloc(sizeof(*solutionData) * (digits(vars) + 1 + digits(clauses) + 1 + digits(cpuTime) + 1 + digits(isSat) + 1 + digits(fileId) + 2));
-    sprintf(solutionData, "%d\n%d\n%f\n%d\n%ld\n", vars, clauses, cpuTime, isSat, fileId);
+    char *solutionData = malloc(sizeof(*solutionData) * (digits(vars) + 1 + digits(clauses) + 1 + digits((int) cpuTime) + 7 + digits(isSat) + 1 + digits(fileId) + 2));
+    sprintf(solutionData, "%d\n%d\n%.5f\n%d\n%ld\n", vars, clauses, cpuTime, isSat, fileId);
     sendSolution(pipefd, solutionData);
-
-    // free(solutionData);
+    free(solutionData);
 }
 
 void sendSolution(int pipefd, char *solution) {

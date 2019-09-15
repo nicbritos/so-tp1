@@ -38,6 +38,10 @@ int digits(long n){
     if(n == 0)
         return 1;
     int ans = 0;
+    if (n < 0) {
+        ans++;
+        n = -n;
+    }
     while(n > 0){
         ans++;
         n/=10; 
@@ -56,9 +60,7 @@ char *readFromFile(int fd) {
 
     bytesRead += bytesReadThisRound;
     if (bytesRead == 0) {
-        if (out != NULL) {
-            free(out);
-        }
+        free(out);
         return NULL;
     }
 
