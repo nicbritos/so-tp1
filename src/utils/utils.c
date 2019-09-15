@@ -70,22 +70,18 @@ int digits(long n){
 }
 
 char *readFromFile(int fd) {
-    int n = 0, current = 0;
-    char *out = malloc(sizeof(*out) * (CHUNK));
-    while ((current = read(fd, out + n, CHUNK)) == CHUNK) {
-        n += CHUNK;
-        out = realloc(out, sizeof(*out) * (CHUNK + n));
+    int bytesRead = 0, bytesReadThisRound = 0;
+    char *out = malloc(sizeof(*out) * CHUNK);
+    while ((bytesReadThisRound = read(fd, out + bytesRead, CHUNK)) == CHUNK) {
+        bytesRead += CHUNK;
+        out = realloc(out, sizeof(*out) * (CHUNK + bytesRead));
     }
-    n += current;
-    if (n == 0) {
+    bytesRead += bytesReadThisRound;
+    if (bytesRead == 0) {
         free(out);
         return NULL;
     }
-    if (n % CHUNK == 0) {
-        out = realloc(out, sizeof(*out) * (CHUNK + ++n));
-    }
-    out[n] = '\0';
-
-    printf("%s\n", out);
+    out = realloc(out, sizeof(*out) * (bytesRead + 1)); //Espacio justo para el string y \0
+    out[bytesRead] = '\0'; //NULL terminated
     return out;
 }
