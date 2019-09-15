@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <string.h>
 #include "slave.h"
 #include "utils/utils.h"
 #include "utils/satStruct.h"
@@ -36,15 +37,15 @@ int main(int argc, char **argv) {
     char *readPipeName = argv[0];
     char *writePipeName = argv[1];
     char *semaphoreName = argv[2];
-    long slaveId = atol(argv[3]);
 
-    int writePipefd = open(writePipeName, O_WRONLY);
-    if (writePipefd == -1) {
+    // Tiene que estar en el mismo orden que en el Application!!!!
+    int readPipefd = open(readPipeName, O_RDONLY);
+    if (readPipefd == -1) {
         perror("Could not open named pipe: ");
         exit(ERROR_FIFO_OPEN_FAIL);
     }
-    int readPipefd = open(readPipeName, O_RDONLY);
-    if (readPipefd == -1) {
+    int writePipefd = open(writePipeName, O_WRONLY);
+    if (writePipefd == -1) {
         perror("Could not open named pipe: ");
         exit(ERROR_FIFO_OPEN_FAIL);
     }
@@ -55,42 +56,54 @@ int main(int argc, char **argv) {
     }
 
     char *filepath = NULL;
-    while ((filepath = readFilepath(readPipefd, filepath, semaphore)) != NULL) {
-        processFile(writePipefd, filepath);
+    long fileId;
+    printf("Slave\n");
+    while ((filepath = readFilepath(readPipefd, filepath, semaphore, &fileId)) != NULL) {
+        printf("Slave: filepath: %s\n", filepath);
+        processFile(writePipefd, filepath, fileId);
     }
 
+    printf("Slave: Exit\n");
     close(writePipefd);
     close(readPipefd);
     exit(ERROR_NO);
 }
 
-char *readFilepath(int pipefd, char *oldFilepath, sem_t *semaphore) {
-    if (oldFilepath != NULL)
+char *readFilepath(int pipefd, char *oldFilepath, sem_t *semaphore, long *fileId) {
+    if (oldFilepath != NULL) {
         free(oldFilepath);
+    }
 
     sem_wait(semaphore);
-    return readFromFile(pipefd);
+    char *data = readFromFile(pipefd);
+    char *separatorPointer = strchr(data, '\n');
+    sscanf(separatorPointer + 1, "%ld", fileId);
+    *separatorPointer = '\0';
+
+    return data;
 }
 
-void processFile(int pipefd, char *filepath) {
+void processFile(int pipefd, char *filepath, long fileId) {
     char *command = malloc(MAXSIZE + strlen(filepath) + 1);
     sprintf(command, "%s %s | %s","minisat", filepath, "egrep \"Number of|CPU|SAT\" | egrep -o \"[0-9]+\\.?[0-9]*|(UN)?SAT\"");
     FILE *output = popen(command, "r");
+    printf("Slave: command: %s\n", command);
     free(command);
 
     int vars, clauses, isSat;
-    long cpuTime;
+    float cpuTime;
     char sat[6]; //UNSAT + \0
-    fscanf(output, "%d\n%d\n%ld\n%s\n", &vars, &clauses, &cpuTime, sat);
+    fscanf(output, "%d\n%d\n%f\n%s\n", &vars, &clauses, &cpuTime, sat);
     isSat = (sat[0] == 'U')?0:(sat[0] == 'S')?1:-1;
     pclose(output);
 
-    char *solutionData = malloc(sizeof(*solutionData) * (digits(vars) + 1 + digits(clauses) + 1 + digits(cpuTime) + 1 + 2));
-    sprintf(solutionData, "%d\n%d\n%ld\n%d", vars, clauses, cpuTime, sat);
+    char *solutionData = malloc(sizeof(*solutionData) * (digits(vars) + 1 + digits(clauses) + 1 + digits(cpuTime) + 1 + digits(isSat) + 1 + digits(fileId) + 2));
+    sprintf(solutionData, "%d\n%d\n%f\n%d\n%ld\n", vars, clauses, cpuTime, isSat, fileId);
     sendSolution(pipefd, solutionData);
+    printf("Slave: solution: %s\n", solutionData);
     free(solutionData);
 }
 
 void sendSolution(int pipefd, char *solution) {
-    write(pipefd, solution, strlen(solution) + 1);
+    write(pipefd, solution, strlen(solution));
 }

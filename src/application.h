@@ -1,18 +1,20 @@
 #ifndef _APPLICATION_H_
 #define _APPLICATION_H_
 
+#include <sys/poll.h>
+
 typedef struct AppStruct {
 	SlaveStruct *slaveStructs;
-	int slavesCount;
+	int slavesQuantity;
 
 	SatStruct *satStructs;
 
-	int filesSolved;
-	int filesSize;
-	int filesSent;
+	long filesSolved;
+	long filesSize;
+	long filesSent;
 	char **files;
 
-    fd_set readfds;
+    struct pollfd *pollfdStructs;
 
 	char *viewSemaphoreName;
 	sem_t *viewSemaphore;
@@ -26,7 +28,7 @@ typedef struct AppStruct {
 int getSlavesQuantity(int filesSize);
 void saveFile(int fd, int count, SatStruct *satStruct);
 int createAndOpenPipe(char *name);
-void sendFile(int fd, char *str);
+void sendFile(int fd, char *fileName, long fileIndex);
 void processInput(int fd, SatStruct *satStructs, char *fileName, int index);
 void terminateSlave(int fd);
 void terminateView(SatStruct *satStructs, int count, sem_t *solvedSemaphore);

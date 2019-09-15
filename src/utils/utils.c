@@ -1,8 +1,10 @@
+#include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <string.h>
 #include "utils.h"
 
 #define CHUNK 5
@@ -17,10 +19,10 @@ void dumpResults(int fd, SatStruct *satStruct) {
          "Clauses: %d\n"
          "Variables: %d\n"
          "Satisfiable: %s\n"
-         "Processing time: %ld\n"
+         "Processing time: %f\n"
          "Processed by Slave ID: %ld\n"
          "--------------------------\n", 
-        satStruct->filename,
+        satStruct->fileName,
         satStruct->clauses,
         satStruct->variables,
         satStruct->isSat == 0 ? "UNSAT" : "SAT",
@@ -46,15 +48,20 @@ int digits(long n){
 char *readFromFile(int fd) {
     int bytesRead = 0, bytesReadThisRound = 0;
     char *out = malloc(sizeof(*out) * CHUNK);
+    
     while ((bytesReadThisRound = read(fd, out + bytesRead, CHUNK)) == CHUNK) {
         bytesRead += CHUNK;
         out = realloc(out, sizeof(*out) * (CHUNK + bytesRead));
     }
+
     bytesRead += bytesReadThisRound;
     if (bytesRead == 0) {
-        free(out);
+        if (out != NULL) {
+            free(out);
+        }
         return NULL;
     }
+
     out = realloc(out, sizeof(*out) * (bytesRead + 1)); //Espacio justo para el string y \0
     out[bytesRead] = '\0'; //NULL terminated
     return out;

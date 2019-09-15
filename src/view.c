@@ -7,6 +7,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <string.h>
 #include <sys/wait.h>
 #include "utils/utils.h"
 #include "utils/satStruct.h"
@@ -36,9 +37,11 @@ int main(int argc, char **argv) {
         exit(ERROR_NO_APPLICATION_PID);
     }
 
+    long unsigned pid = atol(argv[1]);
+
     //Open shared memory
     char *sharedMemoryName = calloc(1, sizeof(char) * MAX_SHARED_MEMORY_NAME_LENGTH);
-    snprintf(sharedMemoryName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILE, argv[1]);
+    snprintf(sharedMemoryName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILE, pid);
     int sharedMemoryfd = shm_open(sharedMemoryName, O_RDONLY, READ_PERM);
     if (sharedMemoryfd == -1) {
         perror("Could not open shared memory object: ");
@@ -47,7 +50,7 @@ int main(int argc, char **argv) {
 
     //Open shared semaphore
     char *sharedSemaphoreName = calloc(1, sizeof(char) * MAX_SEMAPHORE_NAME_LENGTH);
-    snprintf(sharedSemaphoreName, MAX_SEMAPHORE_NAME_LENGTH, SHARED_SEMAPHORE_VIEW_FILE, argv[1]);
+    snprintf(sharedSemaphoreName, MAX_SEMAPHORE_NAME_LENGTH, SHARED_SEMAPHORE_VIEW_FILE, pid);
     sem_t *solvedSemaphore = sem_open(sharedSemaphoreName, O_RDWR);
     if (solvedSemaphore == SEM_FAILED) {
         perror("Could not open shared semaphore: ");
@@ -62,7 +65,7 @@ int main(int argc, char **argv) {
     while (!finished) {
         sem_wait(solvedSemaphore);
         satStruct = getNextSatStruct(satStruct, sharedMemoryfd, count);
-        if (satStruct->filename != NULL) {
+        if (satStruct->fileName != NULL) {
             printResults(satStruct);
             count++;
         } else {

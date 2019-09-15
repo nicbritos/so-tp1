@@ -3,8 +3,8 @@
 
 #include <semaphore.h>
 
-char *readFilepath(int pipefd, char *oldFilepath, sem_t *semaphore);
-void processFile(int pipefd, char *filepath);
+char *readFilepath(int pipefd, char *oldFilepath, sem_t *semaphore, long *fileId);
+void processFile(int pipefd, char *filepath, long fileId);
 void sendSolution(int pipefd, char *solution);
 
 #endif

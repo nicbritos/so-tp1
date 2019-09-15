@@ -2,11 +2,11 @@
 #define _SAT_STRUCT_H_
 
 typedef struct SatStruct {
-	char *filename;
+	char *fileName;
 	int clauses;
 	int variables;
 	int isSat;
-	long processingTime;
+	float processingTime;
 	long processedBySlaveID;
 } SatStruct;
 

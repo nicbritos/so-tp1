@@ -18,11 +18,12 @@
 
 #define SHARED_MEMORY_VIEW_FILE "/tp1ViewMem%lu"
 #define SHARED_SEMAPHORE_VIEW_FILE "/tp1ViewSem%lu"
-#define SHARED_SEMAPHORE_SAT_FILE "/tmp/tp1Sem"
-#define SHARED_PIPE_SAT_WRITE_FILE "/tmp/tp1PipeW"
-#define SHARED_PIPE_SAT_READ_FILE "/tmp/tp1PipeR"
+#define SHARED_SEMAPHORE_SAT_FILE "/tp1SlaveSem"
+#define SHARED_PIPE_SAT_WRITE_FILE "/tmp/tp1SlavePipeW"
+#define SHARED_PIPE_SAT_READ_FILE "/tmp/tp1SlavePipeR"
 #define OUT_FILE "./tp1_output.txt"
 
+#define INFINITE_POLL -1
 #define PIPE_IN_BUFFER_SIZE 4096
 #define READ_AND_WRITE_PERM 0666
 #define WRITE_PERM 0444
@@ -55,33 +56,33 @@ int main(int argc, char **argv) {
 
     // Para proceso Vista
     // sleep(2)
-    printf("%lu\n", getpid());
+    printf("%lu\n", (long unsigned) getpid());
 
     initializeSlaves(&appStruct);
 
     while (appStruct.filesSolved < filesSize) {
-        printf("preselect\n");
-        int ready = select(appStruct.slavesCount, &(appStruct.readfds), NULL, NULL, NULL);
+        printf("PRE POLL\n");
+        int ready = poll(appStruct.pollfdStructs, appStruct.slavesQuantity, INFINITE_POLL);
         if (ready == -1) {
-            printf("SELECT ERROR\n");
+            printf("POLL ERROR\n");
         } else if (ready != 0) {
-            printf("SELECT\n");
-            for (int i = 0; i < appStruct.slavesCount; i++) {
+            printf("POLL\n");
+            for (int i = 0; i < appStruct.slavesQuantity; i++) {
                 SlaveStruct slaveStruct = (appStruct.slaveStructs)[i];
+                struct pollfd pollfdStruct = (appStruct.pollfdStructs)[i];
 
-                if (FD_ISSET(slaveStruct.readPipefd, &(appStruct.readfds))) {
-                    FD_CLR(slaveStruct.readPipefd, &(appStruct.readfds));
+                if (pollfdStruct.revents & POLLIN) {
+                    pollfdStruct.revents = 0;
 
                     processInput(slaveStruct.readPipefd, appStruct.satStructs, "FALTA", (appStruct.filesSolved)++);
+                    sem_post(appStruct.viewSemaphore);
                     if (appStruct.filesSent < filesSize) {
-                        sendFile(slaveStruct.writePipefd, appStruct.files);
+                        sendFile(slaveStruct.writePipefd, appStruct.files[appStruct.filesSent], appStruct.filesSent);
                         appStruct.filesSent++;
                         sem_post(slaveStruct.fileAvailableSemaphore);
                     } else {
                         terminateSlave(slaveStruct.writePipefd);
                     }
-
-                    sem_post(appStruct.viewSemaphore);
                 }
             }
         }
@@ -105,8 +106,18 @@ void saveFile(int fd, int count, SatStruct *satStructs) {
     }
 }
 
-void sendFile(int fd, char *str) {
-    write(fd, str, strlen(str));
+void sendFile(int fd, char *fileName, long fileIndex) {
+    int fileNameLength = strlen(fileName);
+    int fileIndexDigits = digits(fileIndex);
+    if (fileIndex < 0) {
+        fileIndexDigits += 1;
+    }
+    
+    char *data = malloc(sizeof(*data) * (fileNameLength + 1 + fileIndexDigits + 1));
+    sprintf(data, "%s\n%ld", fileName, fileIndex);
+    printf("App: send: %s\n", data);
+    write(fd, data, fileNameLength + fileIndexDigits + 1);
+    free(data);
 }
 
 // TODO: UTILS.C ?
@@ -114,29 +125,29 @@ void processInput(int fd, SatStruct *satStructs, char *fileName, int index) {
     SatStruct *satStruct = satStructs + index;
     char *data = readFromFile(fd);
     printf(data);
-    int vars, clauses, sat;
-    long cpuTime;
-    scanf(data, "%d\n%d\n%ld\n%d", &(satStruct->variables), &(satStruct->clauses), &(satStruct->processingTime), &(satStruct->isSat));
+    long fileIndex;
+    sscanf(data, "%d\n%d\n%f\n%d\n%ld\n", &(satStruct->variables), &(satStruct->clauses), &(satStruct->processingTime), &(satStruct->isSat), &fileIndex);
 
-    satStruct->filename = fileName;
+    satStruct->fileName = fileName;
     satStruct->processedBySlaveID = -1;
+    printf("%d\n%d\n%f\n%d\n%ld\n", satStruct->variables, satStruct->clauses, satStruct->processingTime, satStruct->isSat, fileIndex);
 }
 
 void terminateSlave(int fd) {
-    write(fd, "", 1);
+    sendFile(fd, "\n", -1);
 }
 
 void terminateView(SatStruct *satStructs, int count, sem_t *solvedSemaphore) {
     SatStruct *satStruct = satStructs + count;
-    satStruct->filename = NULL;
+    satStruct->fileName = NULL;
     sem_post(solvedSemaphore);
 }
 
 void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
-    pid_t pid = getpid();
+    long unsigned pid = (long unsigned) getpid();
 
     appStruct->slaveStructs = NULL;
-    appStruct->slavesCount = 0;
+    appStruct->slavesQuantity = 0;
 
     appStruct->satStructs = NULL;
 
@@ -192,8 +203,6 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
 }
 
 void initializeSlaves(AppStruct *appStruct) {
-    pid_t pid = getpid();
-
     int slavesQuantity = getSlavesQuantity(appStruct->filesSize);
     int slavesQuantityDigits = digits(slavesQuantity);
     int fileAvailableSemaphoreNameLength = strlen(SHARED_SEMAPHORE_SAT_FILE);
@@ -201,11 +210,13 @@ void initializeSlaves(AppStruct *appStruct) {
     int readPipeNameLength = strlen(SHARED_PIPE_SAT_READ_FILE);
 
     appStruct->slaveStructs = calloc(slavesQuantity, sizeof(SlaveStruct));
-    FD_ZERO(&(appStruct->readfds));
+    appStruct->pollfdStructs = calloc(slavesQuantity, sizeof(struct pollfd));
     for (int i = 0; i < slavesQuantity; i++) {
         SlaveStruct slaveStruct = (appStruct->slaveStructs)[i];
+        struct pollfd pollfdStruct = (appStruct->pollfdStructs)[i];
+
         slaveStruct.id = i;
-        appStruct->slavesCount += 1;
+        appStruct->slavesQuantity += 1;
 
         // Create Pipes Name
         slaveStruct.writePipeName = malloc(sizeof(*(slaveStruct.writePipeName)) * (writePipeNameLength + slavesQuantityDigits + 1));
@@ -238,24 +249,12 @@ void initializeSlaves(AppStruct *appStruct) {
             shutdown(appStruct, ERROR_FIFO_CREATION_FAIL);
         }
 
-        // Open FIFO
-        slaveStruct.writePipefd = open(slaveStruct.writePipeName, O_WRONLY);
-        if (slaveStruct.writePipefd == -1) {
-            perror("Could not open named pipe");
-            shutdown(appStruct, ERROR_FIFO_OPEN_FAIL);
-        }
-
-        // Open FIFO
-        slaveStruct.readPipefd = open(slaveStruct.readPipeName, O_RDONLY);
-        if (slaveStruct.readPipefd == -1) {
-            perror("Could not open named pipe");
-            shutdown(appStruct, ERROR_FIFO_OPEN_FAIL);
-        }
-        FD_SET(slaveStruct.readPipefd, &(appStruct->readfds));
-
+        pollfdStruct.fd = slaveStruct.readPipefd;
+        pollfdStruct.events = POLLIN;
         // Create semaphore
-        slaveStruct.fileAvailableSemaphore = sem_open(slaveStruct.fileAvailableSemaphoreName, O_CREAT | O_RDWR);
+        slaveStruct.fileAvailableSemaphore = sem_open(slaveStruct.fileAvailableSemaphoreName, O_CREAT | O_RDWR, READ_AND_WRITE_PERM, 0);
         if (slaveStruct.fileAvailableSemaphore == SEM_FAILED) {
+            printf("%s\n", slaveStruct.fileAvailableSemaphoreName);
             perror("Could not create shared semaphore");
             shutdown(appStruct, ERROR_SEMOPEN_FAIL);
         }
@@ -263,50 +262,84 @@ void initializeSlaves(AppStruct *appStruct) {
         int forkResult = fork();
         if (forkResult > 0) {
             // Padre
-            sendFile(slaveStruct.writePipefd, appStruct->files);
+            // Open FIFO
+            slaveStruct.writePipefd = open(slaveStruct.writePipeName, O_WRONLY);
+            if (slaveStruct.writePipefd == -1) {
+                perror("Could not open named pipe");
+                shutdown(appStruct, ERROR_FIFO_OPEN_FAIL);
+            }
+
+            // Open FIFO
+            slaveStruct.readPipefd = open(slaveStruct.readPipeName, O_RDONLY);
+            if (slaveStruct.readPipefd == -1) {
+                perror("Could not open named pipe");
+                shutdown(appStruct, ERROR_FIFO_OPEN_FAIL);
+            }
+            sendFile(slaveStruct.writePipefd, (appStruct->files)[appStruct->filesSent], appStruct->filesSent);
             appStruct->filesSent++;
             sem_post(slaveStruct.fileAvailableSemaphore);
         } else if (forkResult == -1) {
             shutdown(appStruct, ERROR_FIFO_OPEN_FAIL);
         } else {
             // Hijo --> Instanciar cada slave (ver enunciado)
+
             char *slaveId = malloc(sizeof(*slaveId) * (slavesQuantityDigits + 1));
             sprintf(slaveId, "%d", i);
-            char *arguments[4] = {slaveStruct.writePipeName, slaveStruct.readPipeName, slaveStruct.fileAvailableSemaphoreName, slaveId, NULL};
+            char *arguments[4] = {slaveStruct.writePipeName, slaveStruct.readPipeName, slaveStruct.fileAvailableSemaphoreName, NULL};
             if (execvp("./src/slave", arguments) == -1) {
+                printf("Error slave\n");
+                exit(1);
                 // Error. TERMINAR
             }
         }
     }
 }
 
+void shutdownSlave(SlaveStruct *slaveStruct) {
+    // TODO: Race condition????
+    if (slaveStruct->writePipefd != -1) {
+        terminateSlave(slaveStruct->writePipefd);
+        if (slaveStruct->fileAvailableSemaphore != NULL) {
+            sem_post(slaveStruct->fileAvailableSemaphore);
+        }
+        close(slaveStruct->writePipefd);
+        remove(slaveStruct->writePipeName);
+    }
+    if (slaveStruct->fileAvailableSemaphore != NULL) {
+        sem_close(slaveStruct->fileAvailableSemaphore);
+    }
+    if (slaveStruct->fileAvailableSemaphoreName != NULL) {
+        sem_unlink(slaveStruct->fileAvailableSemaphoreName);
+        free(slaveStruct->fileAvailableSemaphoreName);
+    }
+    if (slaveStruct->readPipefd != -1) {
+        close(slaveStruct->readPipefd);
+        remove(slaveStruct->readPipeName);
+    }
+    if (slaveStruct->writePipeName != NULL) {
+        free(slaveStruct->writePipeName);
+    }
+    if (slaveStruct->readPipeName != NULL) {
+        free(slaveStruct->readPipeName);
+    }
+}
+
 void shutdown(AppStruct *appStruct, int exitCode) {
     if (appStruct->slaveStructs != NULL) {
-        for (int i = 0; i < appStruct->slavesCount; i++) {
-            SlaveStruct slaveStruct = (appStruct->slaveStructs)[i];
-
-            sendFile(slaveStruct.writePipefd, "");
-            // TODO: Race condition????
-            sem_post(slaveStruct.fileAvailableSemaphore);
-
-            sem_close(slaveStruct.fileAvailableSemaphore);
-            sem_unlink(slaveStruct.fileAvailableSemaphoreName);
-            free(slaveStruct.fileAvailableSemaphoreName);
-            free(slaveStruct.writePipeName);
-            free(slaveStruct.readPipeName);
-            close(slaveStruct.writePipefd);
-            close(slaveStruct.readPipefd);
+        for (int i = 0; i < appStruct->slavesQuantity; i++) {
+            SlaveStruct *slaveStruct = appStruct->slaveStructs + i;
+            shutdownSlave(slaveStruct);
         }
 
         free(appStruct->slaveStructs);
     }
     if (appStruct->satStructs != NULL) {
-        terminateView(appStruct->satStructs, appStruct->filesSolved, appStruct->viewSemaphore);
-
+        if (appStruct->viewSemaphore != NULL) {
+            terminateView(appStruct->satStructs, appStruct->filesSolved, appStruct->viewSemaphore);
+        }
         // TODO: RACE CONDITION????
         size_t satStructsSize = sizeof(SatStruct) * (appStruct->filesSize + 1); // One more for the terminating struct
         munmap(appStruct->satStructs, satStructsSize);
-        free(appStruct->satStructs);
     }
     if (appStruct->viewSemaphore != NULL) {
         sem_close(appStruct->viewSemaphore);
