@@ -31,3 +31,7 @@ src/view.o:
 
 clean:
 	rm $(OBJECTS) src/view.o src/view src/slave.o src/slave ${EXECUTABLE}
+	rm -f /tmp/tp1SlavePipe*
+
+install:
+	apt-get install minisat
