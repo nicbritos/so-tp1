@@ -56,7 +56,6 @@ int main(int argc, char **argv) {
     char *filepath = NULL;
     long fileId;
     while ((filepath = readFilepath(readPipefd, filepath, semaphore, &fileId)) != NULL && fileId >= 0) {
-        printf("Slave: filename %s\n", filepath);
         processFile(writePipefd, filepath, fileId);
     }
     if (filepath != NULL) {
@@ -74,14 +73,12 @@ char *readFilepath(int pipefd, char *oldFilepath, sem_t *semaphore, long *fileId
         free(oldFilepath);
     }
     // printf("Slave: waiting sem\n");
-    int val;
-    sem_getvalue(semaphore, &val);
-    printf("%d\n", val);
     sem_wait(semaphore);
 
     char *data = readFromFile(pipefd);
     char *separatorPointer = strchr(data, '\n');
-    sscanf(separatorPointer + 1, "%ld", fileId);
+    sscanf(separatorPointer + 1, "%ld\n", fileId);
+    // printf("%ld\n", *fileId);
     *separatorPointer = '\0';
 
     return data;

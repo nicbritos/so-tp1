@@ -107,8 +107,7 @@ int main(int argc, char **argv) {
 }
 
 int getSlavesQuantity(int filesSize) {
-    // return min(ceil(filesSize / FILES_PER_SLAVE), MAX_SLAVES);
-    return 1;
+    return min(ceil(filesSize / FILES_PER_SLAVE), MAX_SLAVES);
 }
 
 int getMinFilesQuantity(int filesSize){
@@ -131,9 +130,9 @@ void sendFile(int fd, char *fileName, long fileIndex) {
         fileIndexDigits = digits(fileIndex);
     }
     
-    char *data = malloc(sizeof(*data) * (fileNameLength + 1 + fileIndexDigits + 1));
-    sprintf(data, "%s\n%ld", fileName, fileIndex);
-    write(fd, data, fileNameLength + fileIndexDigits + 1);
+    char *data = malloc(sizeof(*data) * (fileNameLength + 1 + fileIndexDigits + 2));
+    sprintf(data, "%s\n%ld\n", fileName, fileIndex);
+    write(fd, data, fileNameLength + fileIndexDigits + 2);
     free(data);
 }
 
