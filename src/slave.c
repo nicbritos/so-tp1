@@ -35,7 +35,8 @@ int main(int argc, char **argv) {
 
     char *readPipeName = argv[0];
     char *writePipeName = argv[1];
-    long slaveId = atol(argv[2]);
+    char *semaphoreName = argv[2];
+    long slaveId = atol(argv[3]);
 
     int writePipefd = open(writePipeName, O_WRONLY);
     if (writePipefd == -1) {
@@ -47,9 +48,14 @@ int main(int argc, char **argv) {
         perror("Could not open named pipe: ");
         exit(ERROR_FIFO_OPEN_FAIL);
     }
+    sem_t *semaphore = sem_open(semaphoreName, O_RDWR);
+    if (semaphore == SEM_FAILED) {
+        perror("Could not open shared semaphore");
+        exit(ERROR_SEMOPEN_FAIL);
+    }
 
     char *filepath = NULL;
-    while ((filepath = readFilepath(readPipefd, filepath)) != NULL) {
+    while ((filepath = readFilepath(readPipefd, filepath, semaphore)) != NULL) {
         processFile(writePipefd, filepath);
     }
 
@@ -58,10 +64,11 @@ int main(int argc, char **argv) {
     exit(ERROR_NO);
 }
 
-char *readFilepath(int pipefd, char *oldFilepath) {
+char *readFilepath(int pipefd, char *oldFilepath, sem_t *semaphore) {
     if (oldFilepath != NULL)
         free(oldFilepath);
 
+    sem_wait(semaphore);
     return readFromFile(pipefd);
 }
 

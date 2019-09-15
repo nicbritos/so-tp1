@@ -12,8 +12,8 @@
 #include "utils/satStruct.h"
 #include "view.h"
 
-#define SHARED_SAT_MEMORY_NAME "/tp1mem%s"
-#define SHARED_SAT_DATA_SEMAPHORE_NAME "/tp1sem%s"
+#define SHARED_MEMORY_VIEW_FILE "/tp1ViewMem%lu"
+#define SHARED_SEMAPHORE_VIEW_FILE "/tp1ViewSem%lu"
 
 #define READ_PERM 0222
 #define MAX_SHARED_MEMORY_NAME_LENGTH 256
@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
 
     //Open shared memory
     char *sharedMemoryName = calloc(1, sizeof(char) * MAX_SHARED_MEMORY_NAME_LENGTH);
-    snprintf(sharedMemoryName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_SAT_MEMORY_NAME, argv[1]);
+    snprintf(sharedMemoryName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILE, argv[1]);
     int sharedMemoryfd = shm_open(sharedMemoryName, O_RDONLY, READ_PERM);
     if (sharedMemoryfd == -1) {
         perror("Could not open shared memory object: ");
@@ -47,11 +47,11 @@ int main(int argc, char **argv) {
 
     //Open shared semaphore
     char *sharedSemaphoreName = calloc(1, sizeof(char) * MAX_SEMAPHORE_NAME_LENGTH);
-    snprintf(sharedSemaphoreName, MAX_SEMAPHORE_NAME_LENGTH, SHARED_SAT_DATA_SEMAPHORE_NAME, argv[1]);
+    snprintf(sharedSemaphoreName, MAX_SEMAPHORE_NAME_LENGTH, SHARED_SEMAPHORE_VIEW_FILE, argv[1]);
     sem_t *solvedSemaphore = sem_open(sharedSemaphoreName, O_RDWR);
     if (solvedSemaphore == SEM_FAILED) {
         perror("Could not open shared semaphore: ");
-        closeSharedMemory(sharedMemoryfd);
+        close(sharedMemoryfd);
         exit(ERROR_SEMOPEN_FAIL);
     }
 
@@ -70,10 +70,10 @@ int main(int argc, char **argv) {
         }
     }
 
-    closeSemaphore(solvedSemaphore);
-    closeSharedMemory(sharedMemoryfd);
+    sem_close(solvedSemaphore);
+    close(sharedMemoryfd);
     if (satStruct != NULL)
-        unmapSharedMemory(satStruct, sizeof(SatStruct));
+        munmap(satStruct, sizeof(SatStruct));
 
     exit(0);
 }
@@ -84,13 +84,13 @@ void printResults(SatStruct *satStruct) {
 
 SatStruct* getNextSatStruct(SatStruct *oldMap, int sharedMemoryfd, int count) {
     if (oldMap != NULL) {
-        unmapSharedMemory(oldMap, sizeof(SatStruct));
+        munmap(oldMap, sizeof(SatStruct));
     }
 
     SatStruct *satStruct = (SatStruct*) mmap(NULL, sizeof(SatStruct), PROT_READ, MAP_SHARED, sharedMemoryfd, count * sizeof(SatStruct));
     if (satStruct == NULL) {
         perror("Could not map shared memory: ");
-        closeSharedMemory(sharedMemoryfd);
+        close(sharedMemoryfd);
         exit(ERROR_MMAP_FAIL);
     }
 

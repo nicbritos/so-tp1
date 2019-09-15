@@ -16,8 +16,9 @@
 #include "utils/satStruct.h"
 #include "application.h"
 
-#define SHARED_SAT_MEMORY_NAME "/tp1mem%lu"
-#define SHARED_SAT_DATA_SEMAPHORE_NAME "/tp1sem%lu"
+#define SHARED_MEMORY_VIEW_FILE "/tp1ViewMem%lu"
+#define SHARED_SEMAPHORE_VIEW_FILE "/tp1ViewSem%lu"
+#define SHARED_SEMAPHORE_SAT_FILE "/tmp/tp1Sem"
 #define SHARED_PIPE_SAT_WRITE_FILE "/tmp/tp1PipeW"
 #define SHARED_PIPE_SAT_READ_FILE "/tmp/tp1PipeR"
 #define OUT_FILE "./tp1_output.txt"
@@ -75,11 +76,12 @@ int main(int argc, char **argv) {
                     if (appStruct.filesSent < filesSize) {
                         sendFile(slaveStruct.writePipefd, appStruct.files);
                         appStruct.filesSent++;
+                        sem_post(slaveStruct.fileAvailableSemaphore);
                     } else {
                         terminateSlave(slaveStruct.writePipefd);
                     }
 
-                    sem_post(&(appStruct.viewSemaphore));
+                    sem_post(appStruct.viewSemaphore);
                 }
             }
         }
@@ -151,7 +153,7 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
 
     // Create shared memory
     appStruct->shmName = calloc(1, sizeof(char) * MAX_SHARED_MEMORY_NAME_LENGTH);
-    snprintf(appStruct->shmName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_SAT_MEMORY_NAME, pid);
+    snprintf(appStruct->shmName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILE, pid);
     appStruct->shmfd = shm_open(appStruct->shmName, O_CREAT | O_RDWR, READ_AND_WRITE_PERM);
     if (appStruct->shmfd == -1) {
         perror("Could not create shared memory object");
@@ -174,7 +176,7 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
 
     // Create shared semaphore (View)
     appStruct->viewSemaphoreName = calloc(1, sizeof(char) * MAX_SEMAPHORE_NAME_LENGTH);
-    snprintf(appStruct->viewSemaphoreName, MAX_SEMAPHORE_NAME_LENGTH, SHARED_SAT_DATA_SEMAPHORE_NAME, pid);
+    snprintf(appStruct->viewSemaphoreName, MAX_SEMAPHORE_NAME_LENGTH, SHARED_SEMAPHORE_VIEW_FILE, pid);
     sem_t *solvedSemaphore = sem_open(appStruct->viewSemaphoreName, O_CREAT | O_RDWR);
     if (solvedSemaphore == SEM_FAILED) {
         perror("Could not create shared semaphore");
@@ -194,6 +196,7 @@ void initializeSlaves(AppStruct *appStruct) {
 
     int slavesQuantity = getSlavesQuantity(appStruct->filesSize);
     int slavesQuantityDigits = digits(slavesQuantity);
+    int fileAvailableSemaphoreNameLength = strlen(SHARED_SEMAPHORE_SAT_FILE);
     int writePipeNameLength = strlen(SHARED_PIPE_SAT_WRITE_FILE);
     int readPipeNameLength = strlen(SHARED_PIPE_SAT_READ_FILE);
 
@@ -217,43 +220,59 @@ void initializeSlaves(AppStruct *appStruct) {
         for (int j = 0; j < slavesQuantityDigits - digits(i); j++) {
             slaveStruct.readPipeName[readPipeNameLength + j] = '0';
         }
+        slaveStruct.fileAvailableSemaphoreName = malloc(sizeof(*(slaveStruct.fileAvailableSemaphoreName)) * (fileAvailableSemaphoreNameLength + slavesQuantityDigits + 1));
+        strcpy(slaveStruct.fileAvailableSemaphoreName, SHARED_SEMAPHORE_SAT_FILE);
+        sprintf(slaveStruct.fileAvailableSemaphoreName + fileAvailableSemaphoreNameLength + slavesQuantityDigits - digits(i), "%d", i);
+        for (int j = 0; j < slavesQuantityDigits - digits(i); j++) {
+            slaveStruct.fileAvailableSemaphoreName[fileAvailableSemaphoreNameLength + j] = '0';
+        }
 
+        // Create FIFO (named pipe)
+        if (mkfifo(slaveStruct.writePipeName, READ_AND_WRITE_PERM) == -1) {
+            perror("Could not create named pipe");
+            shutdown(appStruct, ERROR_FIFO_CREATION_FAIL);
+        }
+        // Create FIFO (named pipe)
+        if (mkfifo(slaveStruct.readPipeName, READ_AND_WRITE_PERM) == -1) {
+            perror("Could not create named pipe");
+            shutdown(appStruct, ERROR_FIFO_CREATION_FAIL);
+        }
+
+        // Open FIFO
+        slaveStruct.writePipefd = open(slaveStruct.writePipeName, O_WRONLY);
+        if (slaveStruct.writePipefd == -1) {
+            perror("Could not open named pipe");
+            shutdown(appStruct, ERROR_FIFO_OPEN_FAIL);
+        }
+
+        // Open FIFO
+        slaveStruct.readPipefd = open(slaveStruct.readPipeName, O_RDONLY);
+        if (slaveStruct.readPipefd == -1) {
+            perror("Could not open named pipe");
+            shutdown(appStruct, ERROR_FIFO_OPEN_FAIL);
+        }
+        FD_SET(slaveStruct.readPipefd, &(appStruct->readfds));
+
+        // Create semaphore
+        slaveStruct.fileAvailableSemaphore = sem_open(slaveStruct.fileAvailableSemaphoreName, O_CREAT | O_RDWR);
+        if (slaveStruct.fileAvailableSemaphore == SEM_FAILED) {
+            perror("Could not create shared semaphore");
+            shutdown(appStruct, ERROR_SEMOPEN_FAIL);
+        }
+        
         int forkResult = fork();
         if (forkResult > 0) {
             // Padre
-            // Create FIFO (named pipe)
-            if (mkfifo(slaveStruct.writePipeName, READ_AND_WRITE_PERM) == -1) {
-                perror("Could not create named pipe");
-                shutdown(appStruct, ERROR_FIFO_CREATION_FAIL);
-            }
-            // Create FIFO (named pipe)
-            if (mkfifo(slaveStruct.readPipeName, READ_AND_WRITE_PERM) == -1) {
-                perror("Could not create named pipe");
-                shutdown(appStruct, ERROR_FIFO_CREATION_FAIL);
-            }
-
-            // Open the FIFO 
-            slaveStruct.writePipefd = open(slaveStruct.writePipeName, O_WRONLY);
-            if (slaveStruct.writePipefd == -1) {
-                perror("Could not open named pipe");
-                shutdown(appStruct, ERROR_FIFO_OPEN_FAIL);
-            }
-            slaveStruct.readPipefd = open(slaveStruct.readPipeName, O_RDONLY);
-            if (slaveStruct.readPipefd == -1) {
-                perror("Could not open named pipe");
-                shutdown(appStruct, ERROR_FIFO_OPEN_FAIL);
-            }
-            FD_SET(slaveStruct.readPipefd, &(appStruct->readfds));
-
             sendFile(slaveStruct.writePipefd, appStruct->files);
             appStruct->filesSent++;
+            sem_post(slaveStruct.fileAvailableSemaphore);
         } else if (forkResult == -1) {
             shutdown(appStruct, ERROR_FIFO_OPEN_FAIL);
         } else {
             // Hijo --> Instanciar cada slave (ver enunciado)
             char *slaveId = malloc(sizeof(*slaveId) * (slavesQuantityDigits + 1));
             sprintf(slaveId, "%d", i);
-            char *arguments[4] = {slaveStruct.writePipeName, slaveStruct.readPipeName, slaveId, NULL};
+            char *arguments[4] = {slaveStruct.writePipeName, slaveStruct.readPipeName, slaveStruct.fileAvailableSemaphoreName, slaveId, NULL};
             if (execvp("./src/slave", arguments) == -1) {
                 // Error. TERMINAR
             }
@@ -262,10 +281,32 @@ void initializeSlaves(AppStruct *appStruct) {
 }
 
 void shutdown(AppStruct *appStruct, int exitCode) {
+    if (appStruct->slaveStructs != NULL) {
+        for (int i = 0; i < appStruct->slavesCount; i++) {
+            SlaveStruct slaveStruct = (appStruct->slaveStructs)[i];
+
+            sendFile(slaveStruct.writePipefd, "");
+            // TODO: Race condition????
+            sem_post(slaveStruct.fileAvailableSemaphore);
+
+            sem_close(slaveStruct.fileAvailableSemaphore);
+            sem_unlink(slaveStruct.fileAvailableSemaphoreName);
+            free(slaveStruct.fileAvailableSemaphoreName);
+            free(slaveStruct.writePipeName);
+            free(slaveStruct.readPipeName);
+            close(slaveStruct.writePipefd);
+            close(slaveStruct.readPipefd);
+        }
+
+        free(appStruct->slaveStructs);
+    }
     if (appStruct->satStructs != NULL) {
         terminateView(appStruct->satStructs, appStruct->filesSolved, appStruct->viewSemaphore);
+
+        // TODO: RACE CONDITION????
         size_t satStructsSize = sizeof(SatStruct) * (appStruct->filesSize + 1); // One more for the terminating struct
         munmap(appStruct->satStructs, satStructsSize);
+        free(appStruct->satStructs);
     }
     if (appStruct->viewSemaphore != NULL) {
         sem_close(appStruct->viewSemaphore);

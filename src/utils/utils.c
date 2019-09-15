@@ -28,32 +28,6 @@ void dumpResults(int fd, SatStruct *satStruct) {
         satStruct->processedBySlaveID);
 }
 
-void closeSharedMemory(int fd) {
-    close(fd);
-}
-
-void closeSemaphore(sem_t *sem) {
-    sem_close(sem);
-}
-
-void closeMasterSharedMemory(int fd, char *name) {
-    closeSharedMemory(fd);
-    shm_unlink(name);
-}
-
-void closeMasterSemaphore(sem_t *sem, char *name) {
-    closeSemaphore(sem);
-    sem_unlink(name);
-}
-
-void closePipe(int fd) {
-    close(fd);
-}
-
-void unmapSharedMemory(void *addr, size_t length) {
-	munmap(addr, length);
-}
-
 int min(int a, int b){
 	return (a<b)?a:b;
 }
