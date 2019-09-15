@@ -45,14 +45,15 @@
 #define ERROR_FILE_OPEN_FAIL -8
 
 int main(int argc, char **argv) {
-    int filesSize = argc - 1;
-    if (filesSize < 1) {
+    AppStruct appStruct;
+    
+    appStruct.filesSize = argc - 1;
+    if (appStruct.filesSize < 1) {
         printError("You need to provide at least one CNF file.");
         exit(ERROR_NO_FILES);
     }
 
-    AppStruct appStruct;
-    initializeAppStruct(&appStruct, argv + 1, filesSize);
+    initializeAppStruct(&appStruct, argv + 1, appStruct.filesSize);
 
     // Para proceso Vista
     // sleep(2)
@@ -60,7 +61,7 @@ int main(int argc, char **argv) {
 
     initializeSlaves(&appStruct);
 
-    while (appStruct.filesSolved < filesSize) {
+    while (appStruct.filesSolved < appStruct.filesSize) {
         int ready = poll(appStruct.pollfdStructs, appStruct.slavesQuantity, INFINITE_POLL);
         if (ready == -1) {
             // ERROR
@@ -75,17 +76,24 @@ int main(int argc, char **argv) {
                     processInput(slaveStruct.readPipefd, appStruct.satStructs + appStruct.filesSolved, appStruct.files, slaveStruct.id);
                     appStruct.filesSolved++;
                     
-                        printf("Done: %d\n", appStruct.filesSolved);
+                    // printf("Done: %ld\n", appStruct.filesSolved);
                     sem_post(appStruct.viewSemaphore);
-                    if (appStruct.filesSent < filesSize) {
-                        printf("continue\n");
+                    if (appStruct.filesSent < appStruct.filesSize) {
+                        // printf("continue\n");
                         sendFile(slaveStruct.writePipefd, appStruct.files[appStruct.filesSent], appStruct.filesSent);
                         appStruct.filesSent++;
+                        // int val;
+                        // sem_getvalue(slaveStruct.fileAvailableSemaphore, &val);
+                        // printf("Sem value pre: %d\n", val);
                         sem_post(slaveStruct.fileAvailableSemaphore);
-                        printf("App: Slave Sem posted \n");
+                        // sem_getvalue(slaveStruct.fileAvailableSemaphore, &val);
+                        // printf("Sem value post: %d\n", val);
                     } else {
-                        printf("terminate\n");
+                        // printf("terminate\n");
                         terminateSlave(slaveStruct.writePipefd);
+                        sem_post(slaveStruct.fileAvailableSemaphore);
+                        // close(slaveStruct.writePipefd);
+                        // slaveStruct.writePipefd = -1;
                     }
                 }
             }
@@ -99,7 +107,8 @@ int main(int argc, char **argv) {
 }
 
 int getSlavesQuantity(int filesSize) {
-    return min(ceil(filesSize / FILES_PER_SLAVE), MAX_SLAVES);
+    // return min(ceil(filesSize / FILES_PER_SLAVE), MAX_SLAVES);
+    return 1;
 }
 
 int getMinFilesQuantity(int filesSize){
@@ -115,21 +124,25 @@ void saveFile(int fd, int count, SatStruct *satStructs) {
 
 void sendFile(int fd, char *fileName, long fileIndex) {
     int fileNameLength = strlen(fileName);
-    int fileIndexDigits = digits(fileIndex);
+    int fileIndexDigits;
     if (fileIndex < 0) {
-        fileIndexDigits += 1;
+        fileIndexDigits = digits(-fileIndex) + 1;
+    } else {
+        fileIndexDigits = digits(fileIndex);
     }
     
     char *data = malloc(sizeof(*data) * (fileNameLength + 1 + fileIndexDigits + 1));
     sprintf(data, "%s\n%ld", fileName, fileIndex);
     write(fd, data, fileNameLength + fileIndexDigits + 1);
-    free(data);
+    printf("Sent: %s\n", fileName);
+    // free(data);
 }
 
 void processInput(int fd, SatStruct *satStruct, char **files, int slaveId) {
     long fileIndex;
     char *data = readFromFile(fd);
     sscanf(data, "%d\n%d\n%f\n%d\n%ld\n", &(satStruct->variables), &(satStruct->clauses), &(satStruct->processingTime), &(satStruct->isSat), &fileIndex);
+    // free(data);
 
     satStruct->fileName = files[fileIndex];
     satStruct->processedBySlaveID = slaveId;

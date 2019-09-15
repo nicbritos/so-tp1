@@ -1,8 +1,37 @@
 TP1 - MINISAT output for 1 files
 Filename: cnf/uf100-01.cnf
+Clauses: 24
+Variables: 0
+Satisfiable: SAT
+Processing time: 0.000000
+Processed by Slave ID: 0
+--------------------------
+--
+Filename: cnf/uf100-02.cnf
 Clauses: 430
 Variables: 100
 Satisfiable: SAT
-Processing time: 0.002812
+Processing time: 0.002649
+Processed by Slave ID: 0
+--------------------------
+Filename: cnf/uf100-03.cnf
+Clauses: 430
+Variables: 100
+Satisfiable: SAT
+Processing time: 0.002272
+Processed by Slave ID: 0
+--------------------------
+Filename: cnf/uf100-04.cnf
+Clauses: 430
+Variables: 100
+Satisfiable: SAT
+Processing time: 0.002789
+Processed by Slave ID: 0
+--------------------------
+Filename: cnf/uf100-01000.cnf
+Clauses: 430
+Variables: 100
+Satisfiable: SAT
+Processing time: 0.002200
 Processed by Slave ID: 0
 --------------------------

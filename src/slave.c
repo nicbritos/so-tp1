@@ -57,8 +57,12 @@ int main(int argc, char **argv) {
 
     char *filepath = NULL;
     long fileId;
-    while ((filepath = readFilepath(readPipefd, filepath, semaphore, &fileId)) != NULL) {
+    while ((filepath = readFilepath(readPipefd, filepath, semaphore, &fileId)) != NULL && fileId >= 0) {
+        printf("Slave: filename %s\n", filepath);
         processFile(writePipefd, filepath, fileId);
+    }
+    if (filepath != NULL) {
+        free(filepath);
     }
 
     printf("Slave: Exit\n");
@@ -69,9 +73,9 @@ int main(int argc, char **argv) {
 
 char *readFilepath(int pipefd, char *oldFilepath, sem_t *semaphore, long *fileId) {
     if (oldFilepath != NULL) {
-        free(oldFilepath);
+        // free(oldFilepath);
     }
-
+    // printf("Slave: waiting sem\n");
     sem_wait(semaphore);
 
     char *data = readFromFile(pipefd);
@@ -86,7 +90,7 @@ void processFile(int pipefd, char *filepath, long fileId) {
     char *command = malloc(MAXSIZE + strlen(filepath) + 1);
     sprintf(command, "%s %s | %s","minisat", filepath, "egrep \"Number of|CPU|SAT\" | egrep -o \"[0-9]+\\.?[0-9]*|(UN)?SAT\"");
     FILE *output = popen(command, "r");
-    free(command);
+    // free(command);
 
     int vars, clauses, isSat;
     float cpuTime;
@@ -99,7 +103,7 @@ void processFile(int pipefd, char *filepath, long fileId) {
     sprintf(solutionData, "%d\n%d\n%f\n%d\n%ld\n", vars, clauses, cpuTime, isSat, fileId);
     sendSolution(pipefd, solutionData);
 
-    free(solutionData);
+    // free(solutionData);
 }
 
 void sendSolution(int pipefd, char *solution) {
