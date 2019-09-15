@@ -57,9 +57,7 @@ int main(int argc, char **argv) {
 
     char *filepath = NULL;
     long fileId;
-    printf("Slave\n");
     while ((filepath = readFilepath(readPipefd, filepath, semaphore, &fileId)) != NULL) {
-        printf("Slave: filepath: %s\n", filepath);
         processFile(writePipefd, filepath, fileId);
     }
 
@@ -75,6 +73,7 @@ char *readFilepath(int pipefd, char *oldFilepath, sem_t *semaphore, long *fileId
     }
 
     sem_wait(semaphore);
+
     char *data = readFromFile(pipefd);
     char *separatorPointer = strchr(data, '\n');
     sscanf(separatorPointer + 1, "%ld", fileId);
@@ -87,7 +86,6 @@ void processFile(int pipefd, char *filepath, long fileId) {
     char *command = malloc(MAXSIZE + strlen(filepath) + 1);
     sprintf(command, "%s %s | %s","minisat", filepath, "egrep \"Number of|CPU|SAT\" | egrep -o \"[0-9]+\\.?[0-9]*|(UN)?SAT\"");
     FILE *output = popen(command, "r");
-    printf("Slave: command: %s\n", command);
     free(command);
 
     int vars, clauses, isSat;
@@ -100,7 +98,7 @@ void processFile(int pipefd, char *filepath, long fileId) {
     char *solutionData = malloc(sizeof(*solutionData) * (digits(vars) + 1 + digits(clauses) + 1 + digits(cpuTime) + 1 + digits(isSat) + 1 + digits(fileId) + 2));
     sprintf(solutionData, "%d\n%d\n%f\n%d\n%ld\n", vars, clauses, cpuTime, isSat, fileId);
     sendSolution(pipefd, solutionData);
-    printf("Slave: solution: %s\n", solutionData);
+
     free(solutionData);
 }
 

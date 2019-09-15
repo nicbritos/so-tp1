@@ -61,26 +61,30 @@ int main(int argc, char **argv) {
     initializeSlaves(&appStruct);
 
     while (appStruct.filesSolved < filesSize) {
-        printf("PRE POLL\n");
         int ready = poll(appStruct.pollfdStructs, appStruct.slavesQuantity, INFINITE_POLL);
         if (ready == -1) {
-            printf("POLL ERROR\n");
+            // ERROR
         } else if (ready != 0) {
-            printf("POLL\n");
             for (int i = 0; i < appStruct.slavesQuantity; i++) {
-                SlaveStruct slaveStruct = (appStruct.slaveStructs)[i];
-                struct pollfd pollfdStruct = (appStruct.pollfdStructs)[i];
+                SlaveStruct slaveStruct = appStruct.slaveStructs[i];
+                struct pollfd pollfdStruct = appStruct.pollfdStructs[i];
 
                 if (pollfdStruct.revents & POLLIN) {
                     pollfdStruct.revents = 0;
 
-                    processInput(slaveStruct.readPipefd, appStruct.satStructs, "FALTA", (appStruct.filesSolved)++);
+                    processInput(slaveStruct.readPipefd, appStruct.satStructs + appStruct.filesSolved, appStruct.files, slaveStruct.id);
+                    appStruct.filesSolved++;
+                    
+                        printf("Done: %d\n", appStruct.filesSolved);
                     sem_post(appStruct.viewSemaphore);
                     if (appStruct.filesSent < filesSize) {
+                        printf("continue\n");
                         sendFile(slaveStruct.writePipefd, appStruct.files[appStruct.filesSent], appStruct.filesSent);
                         appStruct.filesSent++;
                         sem_post(slaveStruct.fileAvailableSemaphore);
+                        printf("App: Slave Sem posted \n");
                     } else {
+                        printf("terminate\n");
                         terminateSlave(slaveStruct.writePipefd);
                     }
                 }
@@ -88,6 +92,9 @@ int main(int argc, char **argv) {
         }
     }
 
+    printf("save\n");
+    saveFile(appStruct.outputfd, appStruct.filesSolved, appStruct.satStructs);
+    printf("shutdown\n");
     shutdown(&appStruct, ERROR_NO);
 }
 
@@ -115,22 +122,17 @@ void sendFile(int fd, char *fileName, long fileIndex) {
     
     char *data = malloc(sizeof(*data) * (fileNameLength + 1 + fileIndexDigits + 1));
     sprintf(data, "%s\n%ld", fileName, fileIndex);
-    printf("App: send: %s\n", data);
     write(fd, data, fileNameLength + fileIndexDigits + 1);
     free(data);
 }
 
-// TODO: UTILS.C ?
-void processInput(int fd, SatStruct *satStructs, char *fileName, int index) {
-    SatStruct *satStruct = satStructs + index;
-    char *data = readFromFile(fd);
-    printf(data);
+void processInput(int fd, SatStruct *satStruct, char **files, int slaveId) {
     long fileIndex;
+    char *data = readFromFile(fd);
     sscanf(data, "%d\n%d\n%f\n%d\n%ld\n", &(satStruct->variables), &(satStruct->clauses), &(satStruct->processingTime), &(satStruct->isSat), &fileIndex);
 
-    satStruct->fileName = fileName;
-    satStruct->processedBySlaveID = -1;
-    printf("%d\n%d\n%f\n%d\n%ld\n", satStruct->variables, satStruct->clauses, satStruct->processingTime, satStruct->isSat, fileIndex);
+    satStruct->fileName = files[fileIndex];
+    satStruct->processedBySlaveID = slaveId;
 }
 
 void terminateSlave(int fd) {
@@ -188,14 +190,14 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
     // Create shared semaphore (View)
     appStruct->viewSemaphoreName = calloc(1, sizeof(char) * MAX_SEMAPHORE_NAME_LENGTH);
     snprintf(appStruct->viewSemaphoreName, MAX_SEMAPHORE_NAME_LENGTH, SHARED_SEMAPHORE_VIEW_FILE, pid);
-    sem_t *solvedSemaphore = sem_open(appStruct->viewSemaphoreName, O_CREAT | O_RDWR);
-    if (solvedSemaphore == SEM_FAILED) {
+    appStruct->viewSemaphore = sem_open(appStruct->viewSemaphoreName, O_CREAT | O_RDWR);
+    if (appStruct->viewSemaphore == SEM_FAILED) {
         perror("Could not create shared semaphore");
         shutdown(appStruct, ERROR_SEMOPEN_FAIL);
     }
 
     // Create the output file
-    appStruct->outputfd = open(OUT_FILE, O_CREAT | O_RDONLY, READ_AND_WRITE_PERM);
+    appStruct->outputfd = open(OUT_FILE, O_CREAT | O_RDWR, READ_AND_WRITE_PERM);
     if (appStruct->outputfd == -1) {
         perror("Could not create output file");
         shutdown(appStruct, ERROR_FILE_OPEN_FAIL);
@@ -212,49 +214,46 @@ void initializeSlaves(AppStruct *appStruct) {
     appStruct->slaveStructs = calloc(slavesQuantity, sizeof(SlaveStruct));
     appStruct->pollfdStructs = calloc(slavesQuantity, sizeof(struct pollfd));
     for (int i = 0; i < slavesQuantity; i++) {
-        SlaveStruct slaveStruct = (appStruct->slaveStructs)[i];
-        struct pollfd pollfdStruct = (appStruct->pollfdStructs)[i];
+        SlaveStruct *slaveStruct = appStruct->slaveStructs  + i;
+        struct pollfd *pollfdStruct = appStruct->pollfdStructs + i;
 
-        slaveStruct.id = i;
+        slaveStruct->id = i;
         appStruct->slavesQuantity += 1;
 
         // Create Pipes Name
-        slaveStruct.writePipeName = malloc(sizeof(*(slaveStruct.writePipeName)) * (writePipeNameLength + slavesQuantityDigits + 1));
-        strcpy(slaveStruct.writePipeName, SHARED_PIPE_SAT_WRITE_FILE);
-        sprintf(slaveStruct.writePipeName + writePipeNameLength + slavesQuantityDigits - digits(i), "%d", i);
+        slaveStruct->writePipeName = malloc(sizeof(*(slaveStruct->writePipeName)) * (writePipeNameLength + slavesQuantityDigits + 1));
+        strcpy(slaveStruct->writePipeName, SHARED_PIPE_SAT_WRITE_FILE);
+        sprintf(slaveStruct->writePipeName + writePipeNameLength + slavesQuantityDigits - digits(i), "%d", i);
         for (int j = 0; j < slavesQuantityDigits - digits(i); j++) {
-            slaveStruct.writePipeName[writePipeNameLength + j] = '0';
+            slaveStruct->writePipeName[writePipeNameLength + j] = '0';
         }
-        slaveStruct.readPipeName = malloc(sizeof(*(slaveStruct.readPipeName)) * (readPipeNameLength + slavesQuantityDigits + 1));
-        strcpy(slaveStruct.readPipeName, SHARED_PIPE_SAT_READ_FILE);
-        sprintf(slaveStruct.readPipeName + readPipeNameLength + slavesQuantityDigits - digits(i), "%d", i);
+        slaveStruct->readPipeName = malloc(sizeof(*(slaveStruct->readPipeName)) * (readPipeNameLength + slavesQuantityDigits + 1));
+        strcpy(slaveStruct->readPipeName, SHARED_PIPE_SAT_READ_FILE);
+        sprintf(slaveStruct->readPipeName + readPipeNameLength + slavesQuantityDigits - digits(i), "%d", i);
         for (int j = 0; j < slavesQuantityDigits - digits(i); j++) {
-            slaveStruct.readPipeName[readPipeNameLength + j] = '0';
+            slaveStruct->readPipeName[readPipeNameLength + j] = '0';
         }
-        slaveStruct.fileAvailableSemaphoreName = malloc(sizeof(*(slaveStruct.fileAvailableSemaphoreName)) * (fileAvailableSemaphoreNameLength + slavesQuantityDigits + 1));
-        strcpy(slaveStruct.fileAvailableSemaphoreName, SHARED_SEMAPHORE_SAT_FILE);
-        sprintf(slaveStruct.fileAvailableSemaphoreName + fileAvailableSemaphoreNameLength + slavesQuantityDigits - digits(i), "%d", i);
+        slaveStruct->fileAvailableSemaphoreName = malloc(sizeof(*(slaveStruct->fileAvailableSemaphoreName)) * (fileAvailableSemaphoreNameLength + slavesQuantityDigits + 1));
+        strcpy(slaveStruct->fileAvailableSemaphoreName, SHARED_SEMAPHORE_SAT_FILE);
+        sprintf(slaveStruct->fileAvailableSemaphoreName + fileAvailableSemaphoreNameLength + slavesQuantityDigits - digits(i), "%d", i);
         for (int j = 0; j < slavesQuantityDigits - digits(i); j++) {
-            slaveStruct.fileAvailableSemaphoreName[fileAvailableSemaphoreNameLength + j] = '0';
+            slaveStruct->fileAvailableSemaphoreName[fileAvailableSemaphoreNameLength + j] = '0';
         }
 
         // Create FIFO (named pipe)
-        if (mkfifo(slaveStruct.writePipeName, READ_AND_WRITE_PERM) == -1) {
+        if (mkfifo(slaveStruct->writePipeName, READ_AND_WRITE_PERM) == -1) {
             perror("Could not create named pipe");
             shutdown(appStruct, ERROR_FIFO_CREATION_FAIL);
         }
         // Create FIFO (named pipe)
-        if (mkfifo(slaveStruct.readPipeName, READ_AND_WRITE_PERM) == -1) {
+        if (mkfifo(slaveStruct->readPipeName, READ_AND_WRITE_PERM) == -1) {
             perror("Could not create named pipe");
             shutdown(appStruct, ERROR_FIFO_CREATION_FAIL);
         }
 
-        pollfdStruct.fd = slaveStruct.readPipefd;
-        pollfdStruct.events = POLLIN;
         // Create semaphore
-        slaveStruct.fileAvailableSemaphore = sem_open(slaveStruct.fileAvailableSemaphoreName, O_CREAT | O_RDWR, READ_AND_WRITE_PERM, 0);
-        if (slaveStruct.fileAvailableSemaphore == SEM_FAILED) {
-            printf("%s\n", slaveStruct.fileAvailableSemaphoreName);
+        slaveStruct->fileAvailableSemaphore = sem_open(slaveStruct->fileAvailableSemaphoreName, O_CREAT | O_RDWR, READ_AND_WRITE_PERM, 0);
+        if (slaveStruct->fileAvailableSemaphore == SEM_FAILED) {
             perror("Could not create shared semaphore");
             shutdown(appStruct, ERROR_SEMOPEN_FAIL);
         }
@@ -263,21 +262,24 @@ void initializeSlaves(AppStruct *appStruct) {
         if (forkResult > 0) {
             // Padre
             // Open FIFO
-            slaveStruct.writePipefd = open(slaveStruct.writePipeName, O_WRONLY);
-            if (slaveStruct.writePipefd == -1) {
+            slaveStruct->writePipefd = open(slaveStruct->writePipeName, O_WRONLY);
+            if (slaveStruct->writePipefd == -1) {
                 perror("Could not open named pipe");
                 shutdown(appStruct, ERROR_FIFO_OPEN_FAIL);
             }
 
             // Open FIFO
-            slaveStruct.readPipefd = open(slaveStruct.readPipeName, O_RDONLY);
-            if (slaveStruct.readPipefd == -1) {
+            slaveStruct->readPipefd = open(slaveStruct->readPipeName, O_RDONLY);
+            if (slaveStruct->readPipefd == -1) {
                 perror("Could not open named pipe");
                 shutdown(appStruct, ERROR_FIFO_OPEN_FAIL);
             }
-            sendFile(slaveStruct.writePipefd, (appStruct->files)[appStruct->filesSent], appStruct->filesSent);
+
+            pollfdStruct->fd = slaveStruct->readPipefd;
+            pollfdStruct->events = POLLIN;
+            sendFile(slaveStruct->writePipefd, appStruct->files[appStruct->filesSent], appStruct->filesSent);
             appStruct->filesSent++;
-            sem_post(slaveStruct.fileAvailableSemaphore);
+            sem_post(slaveStruct->fileAvailableSemaphore);
         } else if (forkResult == -1) {
             shutdown(appStruct, ERROR_FIFO_OPEN_FAIL);
         } else {
@@ -285,7 +287,7 @@ void initializeSlaves(AppStruct *appStruct) {
 
             char *slaveId = malloc(sizeof(*slaveId) * (slavesQuantityDigits + 1));
             sprintf(slaveId, "%d", i);
-            char *arguments[4] = {slaveStruct.writePipeName, slaveStruct.readPipeName, slaveStruct.fileAvailableSemaphoreName, NULL};
+            char *arguments[4] = {slaveStruct->writePipeName, slaveStruct->readPipeName, slaveStruct->fileAvailableSemaphoreName, NULL};
             if (execvp("./src/slave", arguments) == -1) {
                 printf("Error slave\n");
                 exit(1);
@@ -332,6 +334,9 @@ void shutdown(AppStruct *appStruct, int exitCode) {
         }
 
         free(appStruct->slaveStructs);
+        if (appStruct->pollfdStructs != NULL) {
+            free(appStruct->pollfdStructs);
+        }
     }
     if (appStruct->satStructs != NULL) {
         if (appStruct->viewSemaphore != NULL) {
