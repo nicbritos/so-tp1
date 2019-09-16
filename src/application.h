@@ -8,6 +8,7 @@ typedef struct AppStruct {
 	int slavesQuantity;
 
 	SatStruct *satStructs;
+	size_t satStructsSize;
 
 	long filesSolved;
 	long filesSize;

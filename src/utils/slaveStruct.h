@@ -11,6 +11,7 @@ typedef struct SlaveStruct {
 	char *readPipeName;
 
 	int filesSent;
+	int terminated;
 
 	int writePipefd;
 	int readPipefd;

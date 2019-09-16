@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <sys/poll.h>
+#include <sys/wait.h>
 #include <sys/types.h>
 #include <semaphore.h>
 #include <sys/select.h>
@@ -54,29 +55,23 @@ int main(int argc, char **argv) {
             // ERROR
         } else if (ready != 0) {
             for (int i = 0; i < appStruct.slavesQuantity; i++) {
-                SlaveStruct slaveStruct = appStruct.slaveStructs[i];
-                struct pollfd pollfdStruct = appStruct.pollfdStructs[i];
+                SlaveStruct *slaveStruct = appStruct.slaveStructs + i;
+                struct pollfd *pollfdStruct = appStruct.pollfdStructs + i;
 
-                if (pollfdStruct.revents & POLLIN) {
-                    pollfdStruct.revents = 0;
+                if (pollfdStruct->revents & POLLIN) {
+                    pollfdStruct->revents = 0;
 
-                    processInput(slaveStruct.readPipefd, appStruct.satStructs + appStruct.filesSolved, &appStruct, &slaveStruct);
+                    processInput(slaveStruct->readPipefd, appStruct.satStructs + appStruct.filesSolved, &appStruct, slaveStruct);
                     appStruct.filesSolved++;
                     
-                    printf("Done: %ld\n", appStruct.filesSolved);
                     sem_post(appStruct.viewSemaphore);
                     if (appStruct.filesSent < appStruct.filesSize) {
-                        sendFile(&slaveStruct, appStruct.files[appStruct.filesSent], appStruct.filesSent);
+                        sendFile(slaveStruct, appStruct.files[appStruct.filesSent], appStruct.filesSent);
                         appStruct.filesSent++;
-                        // int val;
-                        // sem_getvalue(slaveStruct.fileAvailableSemaphore, &val);
-                        // printf("Sem value pre: %d\n", val);
-                        sem_post(slaveStruct.fileAvailableSemaphore);
-                        // sem_getvalue(slaveStruct.fileAvailableSemaphore, &val);
-                        // printf("Sem value post: %d\n", val);
-                    } else if (slaveStruct.filesSent == 0) {
-                        printf("kill\n");
-                        terminateSlave(&slaveStruct);
+                        sem_post(slaveStruct->fileAvailableSemaphore);
+                    } else if (slaveStruct->filesSent == 0) {
+                        // printf("fileszie0\n");
+                        terminateSlave(slaveStruct);
                         // shutdownSlave(&slaveStruct);
                     }
                 }
@@ -84,10 +79,17 @@ int main(int argc, char **argv) {
         }
     }
 
-    printf("save\n");
     saveFile(appStruct.outputfd, appStruct.filesSolved, appStruct.satStructs);
-    printf("shutdown\n");
-    sleep(1); // TODO: Fix race conditions. Wait for slave to disconnect!!!!!!!!
+
+    for (int i = 0; i < appStruct.slavesQuantity; i++) {
+        SlaveStruct *slaveStruct = appStruct.slaveStructs + i;
+        terminateSlave(slaveStruct);
+        waitpid(-1, NULL, 0);
+        // shutdownSlave(&slaveStruct);
+    }
+
+    printf("all finished\n");
+
     shutdown(&appStruct, ERROR_NO);
 }
 
@@ -159,8 +161,13 @@ void writeFileNameToBuffer(AppStruct *appStruct, char *s, int length) {
 }
 
 void terminateSlave(SlaveStruct *slaveStruct) {
-    sendFile(slaveStruct, "\n", -1);
-    sem_post(slaveStruct->fileAvailableSemaphore);
+    if (!slaveStruct->terminated) {
+        sendFile(slaveStruct, "\n", -1);
+        if (slaveStruct->fileAvailableSemaphore != NULL) {
+            sem_post(slaveStruct->fileAvailableSemaphore);
+        }
+        slaveStruct->terminated = 1;
+    }
 }
 
 void terminateView(SatStruct *satStructs, int count, sem_t *solvedSemaphore) {
@@ -203,14 +210,14 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
     }
 
     // Reserve storage for shared memory
-    size_t mapSize = sizeof(long) + sizeof(SatStruct) * filesSize; // Long indicates filesqty.
-    if (ftruncate(appStruct->shmfd, mapSize) == -1) {
+    appStruct->satStructsSize = sizeof(long) + sizeof(SatStruct) * filesSize; // Long indicates filesqty.
+    if (ftruncate(appStruct->shmfd, appStruct->satStructsSize) == -1) {
         perror("Could not expand shared memory object");
         shutdown(appStruct, ERROR_FTRUNCATE_FAIL);
     }
 
     // Map the shared memory
-    char *map = mmap(NULL, mapSize, PROT_READ | PROT_WRITE, MAP_SHARED, appStruct->shmfd, 0);
+    char *map = mmap(NULL, appStruct->satStructsSize, PROT_READ | PROT_WRITE, MAP_SHARED, appStruct->shmfd, 0);
     *((long*) map) = filesSize;
     appStruct->satStructs = (SatStruct*) (map + sizeof(long));
     if (appStruct->satStructs == MAP_FAILED) {
@@ -275,6 +282,8 @@ void initializeSlaves(AppStruct *appStruct) {
 
         slaveStruct->id = i;
         appStruct->slavesQuantity += 1;
+        slaveStruct->filesSent = 0;
+        slaveStruct->terminated = 0;
 
         // Create Pipes Name
         slaveStruct->writePipeName = malloc(sizeof(*(slaveStruct->writePipeName)) * (writePipeNameLength + slavesQuantityDigits + 1));
@@ -354,11 +363,11 @@ void initializeSlaves(AppStruct *appStruct) {
 }
 
 void shutdownSlave(SlaveStruct *slaveStruct) {
-    // TODO: Race condition????
     if (slaveStruct->writePipefd != -1) {
         terminateSlave(slaveStruct);
         if (slaveStruct->fileAvailableSemaphore != NULL) {
             sem_post(slaveStruct->fileAvailableSemaphore);
+            slaveStruct->fileAvailableSemaphore = NULL;
         }
         close(slaveStruct->writePipefd);
         remove(slaveStruct->writePipeName);
@@ -394,37 +403,53 @@ void shutdown(AppStruct *appStruct, int exitCode) {
             SlaveStruct *slaveStruct = appStruct->slaveStructs + i;
             shutdownSlave(slaveStruct);
         }
-
         free(appStruct->slaveStructs);
-        if (appStruct->pollfdStructs != NULL) {
-            free(appStruct->pollfdStructs);
-        }
+        appStruct->slaveStructs = NULL;
+    } 
+    if (appStruct->pollfdStructs != NULL) {
+        free(appStruct->pollfdStructs);
+        appStruct->pollfdStructs = NULL;
     }
     if (appStruct->satStructs != NULL) {
         if (appStruct->viewSemaphore != NULL) {
             terminateView(appStruct->satStructs, appStruct->filesSolved, appStruct->viewSemaphore);
+            appStruct->viewSemaphore = NULL;
         }
-        // TODO: RACE CONDITION????
-        size_t satStructsSize = sizeof(SatStruct) * (appStruct->filesSize + 1); // One more for the terminating struct
-        munmap(appStruct->satStructs, satStructsSize);
+        munmap(appStruct->satStructs, appStruct->satStructsSize);
+        appStruct->satStructs = NULL;
     }
     if (appStruct->viewSemaphore != NULL) {
         sem_close(appStruct->viewSemaphore);
+        appStruct->viewSemaphore = NULL;
     }
     if (appStruct->viewSemaphoreName != NULL) {
         sem_unlink(appStruct->viewSemaphoreName);
         free(appStruct->viewSemaphoreName);
+        appStruct->viewSemaphoreName = NULL;
     }
     if (appStruct->outputfd != -1) {
         close(appStruct->outputfd);
+        appStruct->outputfd = -1;
     }
     if (appStruct->shmfd != -1) {
         close(appStruct->shmfd);
+        appStruct->shmfd = -1;
+    }
+    if (appStruct->fileNameShmfd != -1) {
+        close(appStruct->fileNameShmfd);
+        appStruct->fileNameShmfd = -1;
     }
     if (appStruct->shmName != NULL) {
         shm_unlink(appStruct->shmName);
         free(appStruct->shmName);
+        appStruct->shmName = NULL;
     }
+    if (appStruct->fileNameShmMapName != NULL) {
+        shm_unlink(appStruct->fileNameShmMapName);
+        free(appStruct->fileNameShmMapName);
+        appStruct->fileNameShmMapName = NULL;
+    }
+
 
     exit(exitCode);
 }

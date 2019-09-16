@@ -59,13 +59,13 @@ char *readFilepath(int pipefd, char *oldFilepath, sem_t *semaphore, long *fileId
     if (oldFilepath != NULL) {
         free(oldFilepath);
     }
-
+    
     sem_wait(semaphore);
-
     char *data = readFromFile(pipefd);
     char *separatorPointer = strchr(data, '\n');
     sscanf(separatorPointer + 1, "%ld\n", fileId);
     *separatorPointer = '\0';
+
     return data;
 }
 
