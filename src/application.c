@@ -29,7 +29,6 @@
 #define MAX_FILES_PER_SLAVE 2
 #define FILES_PER_SLAVE 10.0
 #define INFINITE_POLL -1
-#define MAX_SLAVES 512 // Solves problem of "Too many files open"
 
 int main(int argc, char **argv) {
     AppStruct appStruct;
@@ -89,8 +88,20 @@ int main(int argc, char **argv) {
     shutdown(&appStruct, ERROR_NO);
 }
 
+int getMaxSlavesQuantity() {
+    int maxFiles = sysconf(_SC_OPEN_MAX);
+    // Restamos 10 ya que: 2 corresponden a los fd de los shm,
+    // 1 al fd del semaforo del view, 2 al stdin y stdout de
+    // este proceso y 5 mas para tener margen.
+    // Este numero tambien es seguro de utilizar (en el sentido
+    // de que provoca que la funcion devuelva un numero  siempre
+    // >= 1) debido a que POSIX define un minimo de 20 fds
+    // abiertos a soportar por proceso.
+    return (maxFiles - 10) / 3;
+}
+
 int getSlavesQuantity(long filesSize) {
-    return min(ceil(filesSize / FILES_PER_SLAVE), MAX_SLAVES);
+    return min(ceil(filesSize / FILES_PER_SLAVE), getMaxSlavesQuantity());
 }
 
 int getFilesPerSlaveQuantity(long filesSize) {
