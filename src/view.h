@@ -1,7 +1,7 @@
 #ifndef _SO_VIEW_H_
 #define _SO_VIEW_H_
 
-void printResults(SatStruct *satStruct);
-SatStruct* getNextSatStruct(SatStruct *oldMap, int sharedMemoryfd, int count);
+char* getNextSolved(char *map, char **output, int sharedMemoryfd, int * count);
+long findSeparatorN(char *s, int max);
 
 #endif

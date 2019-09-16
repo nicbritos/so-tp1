@@ -11,10 +11,10 @@
 #include <sys/time.h>
 #include <sys/select.h>
 #include <string.h>
-#include "utils/utils.h"
 #include "utils/slaveStruct.h"
 #include "utils/satStruct.h"
 #include "application.h"
+#include "utils/utils.h"
 
 #define SHARED_MEMORY_VIEW_FILE "/tp1ViewMem%lu"
 #define SHARED_SEMAPHORE_VIEW_FILE "/tp1ViewSem%lu"
@@ -33,6 +33,8 @@
 #define MAX_SHARED_MEMORY_NAME_LENGTH 256
 #define MAX_SEMAPHORE_NAME_LENGTH 256
 #define MAX_SLAVES 512 // Solves problem of "Too many files open"
+#define INIT_SIZE_PER_FILE 24
+#define SHM_CHUNK_SIZE_PER_FILE 20 
 
 #define ERROR_NO 0
 #define ERROR_NO_FILES -1
@@ -43,6 +45,7 @@
 #define ERROR_FIFO_CREATION_FAIL -6
 #define ERROR_FIFO_OPEN_FAIL -7
 #define ERROR_FILE_OPEN_FAIL -8
+#define ERROR_NO_MEM -9
 
 int main(int argc, char **argv) {
     AppStruct appStruct;
@@ -56,8 +59,8 @@ int main(int argc, char **argv) {
     initializeAppStruct(&appStruct, argv + 1, appStruct.filesSize);
 
     // Para proceso Vista
-    // sleep(2)
     printf("%lu\n", (long unsigned) getpid());
+    //sleep(5);
 
     initializeSlaves(&appStruct);
 
@@ -73,10 +76,10 @@ int main(int argc, char **argv) {
                 if (pollfdStruct.revents & POLLIN) {
                     pollfdStruct.revents = 0;
 
-                    processInput(slaveStruct.readPipefd, appStruct.satStructs + appStruct.filesSolved, appStruct.files, slaveStruct.id);
+                    processInput(&appStruct, slaveStruct.readPipefd, appStruct.satStructs + appStruct.filesSolved, appStruct.files, slaveStruct.id);
                     appStruct.filesSolved++;
                     
-                    // printf("Done: %ld\n", appStruct.filesSolved);
+                    printf("Done: %ld\n", appStruct.filesSolved);
                     sem_post(appStruct.viewSemaphore);
                     if (appStruct.filesSent < appStruct.filesSize) {
                         // printf("continue\n");
@@ -136,23 +139,43 @@ void sendFile(int fd, char *fileName, long fileIndex) {
     free(data);
 }
 
-void processInput(int fd, SatStruct *satStruct, char **files, int slaveId) {
+void processInput(AppStruct * appStruct, int fd, SatStruct *satStruct, char **files, int slaveId) {
+
     long fileIndex;
     char *data = readFromFile(fd);
+    printf("TOY\n");
+    printf("%s\n", data);
     sscanf(data, "%d\n%d\n%f\n%d\n%ld\n", &(satStruct->variables), &(satStruct->clauses), &(satStruct->processingTime), &(satStruct->isSat), &fileIndex);
+    printf("TOY\n\n");
     free(data);
-
     satStruct->fileName = files[fileIndex];
     satStruct->processedBySlaveID = slaveId;
+
+    int outputLength = strlen(satStruct->fileName) + 1 + digits(satStruct->variables) + 1 + digits(satStruct->clauses) + 1 + 8 + 1 + 8 + 1;
+    if(outputLength + appStruct->shmCursorPosition > appStruct->shmSize){
+        if (ftruncate(appStruct->shmfd, appStruct->shmSize + (appStruct->filesSize - appStruct->filesSolved) * SHM_CHUNK_SIZE_PER_FILE) == -1) {
+            perror("Could not expand shared memory object");
+            shutdown(appStruct, ERROR_FTRUNCATE_FAIL);
+        }
+        appStruct->shmContent = (char *) mmap(NULL, appStruct->shmSize + (appStruct->filesSize - appStruct->filesSolved) * SHM_CHUNK_SIZE_PER_FILE, PROT_READ | PROT_WRITE, MAP_SHARED, appStruct->shmfd, 0);
+        if (appStruct->shmContent == NULL) {
+            perror("Could not map shared memory");
+            shutdown(appStruct, ERROR_MMAP_FAIL);
+        }
+        appStruct->shmSize += (appStruct->filesSize - appStruct->filesSolved) * SHM_CHUNK_SIZE_PER_FILE;
+    }
+    char * output = malloc(sizeof(*output) * outputLength);
+    sprintf(output, "%s\n%d\n%d\n%f\n%s%s\n\n", satStruct->fileName, satStruct->variables, satStruct->clauses, satStruct->processingTime, (satStruct->isSat == 0)?"UN":"","SAT");
+    strncat(appStruct->shmContent, output, outputLength);
+    free(output);
 }
 
 void terminateSlave(int fd) {
     sendFile(fd, "\n", -1);
 }
 
-void terminateView(SatStruct *satStructs, int count, sem_t *solvedSemaphore) {
-    SatStruct *satStruct = satStructs + count;
-    satStruct->fileName = NULL;
+void terminateView(AppStruct *appStruct, sem_t *solvedSemaphore) {
+    strcat(appStruct->shmContent, "\0");
     sem_post(solvedSemaphore);
 }
 
@@ -175,6 +198,10 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
     appStruct->shmfd = -1;
     appStruct->outputfd = -1;
 
+    appStruct->shmCursorPosition = 0;
+    appStruct->shmContent = NULL;
+    appStruct->shmSize = 0;
+
     // Create shared memory
     appStruct->shmName = calloc(1, sizeof(char) * MAX_SHARED_MEMORY_NAME_LENGTH);
     snprintf(appStruct->shmName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILE, pid);
@@ -186,16 +213,24 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
 
     // Reserve storage for shared memory
     size_t satStructsSize = sizeof(SatStruct) * (filesSize + 1); // One more for the terminating struct
-    if (ftruncate(appStruct->shmfd, satStructsSize) == -1) {
+    if (ftruncate(appStruct->shmfd, filesSize * INIT_SIZE_PER_FILE) == -1) {
         perror("Could not expand shared memory object");
         shutdown(appStruct, ERROR_FTRUNCATE_FAIL);
     }
 
     // Map the shared memory
-    appStruct->satStructs = (SatStruct*) mmap(NULL, satStructsSize, PROT_READ | PROT_WRITE, MAP_SHARED, appStruct->shmfd, 0);
-    if (appStruct->satStructs == NULL) {
+    appStruct->shmContent = (char *) mmap(NULL, filesSize * INIT_SIZE_PER_FILE, PROT_READ | PROT_WRITE, MAP_SHARED, appStruct->shmfd, 0);
+    if (appStruct->shmContent == NULL) {
         perror("Could not map shared memory");
         shutdown(appStruct, ERROR_MMAP_FAIL);
+    }
+    appStruct->shmSize = filesSize * INIT_SIZE_PER_FILE;
+
+
+    appStruct->satStructs = (SatStruct*) malloc(satStructsSize);
+    if (appStruct->satStructs == NULL) {
+        perror("Could not reserve memory");
+        shutdown(appStruct, ERROR_NO_MEM);
     }
 
     // Create shared semaphore (View)
@@ -348,7 +383,7 @@ void shutdown(AppStruct *appStruct, int exitCode) {
     }
     if (appStruct->satStructs != NULL) {
         if (appStruct->viewSemaphore != NULL) {
-            terminateView(appStruct->satStructs, appStruct->filesSolved, appStruct->viewSemaphore);
+            terminateView(appStruct, appStruct->viewSemaphore);
         }
         // TODO: RACE CONDITION????
         size_t satStructsSize = sizeof(SatStruct) * (appStruct->filesSize + 1); // One more for the terminating struct

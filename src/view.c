@@ -59,15 +59,15 @@ int main(int argc, char **argv) {
     }
 
     // Print available data
-    SatStruct *satStruct = NULL;
+    char *map = NULL;
     int count = 0;
     int finished = 0;
+    char * output = NULL;
     while (!finished) {
         sem_wait(solvedSemaphore);
-        satStruct = getNextSatStruct(satStruct, sharedMemoryfd, count);
-        if (satStruct->fileName != NULL) {
-            printResults(satStruct);
-            count++;
+        map = getNextSolved(map, &output, sharedMemoryfd, &count);
+        if (output != NULL) {
+            printf("%s\n", output);
         } else {
             finished = 1;
         }
@@ -75,27 +75,38 @@ int main(int argc, char **argv) {
 
     sem_close(solvedSemaphore);
     close(sharedMemoryfd);
-    if (satStruct != NULL)
-        munmap(satStruct, sizeof(SatStruct));
+    if (map != NULL)
+        if(output != NULL)
+            munmap(map, strlen(output));
 
     exit(0);
 }
 
-void printResults(SatStruct *satStruct) {
-    dumpResults(STDOUT_FD, satStruct);
-}
-
-SatStruct* getNextSatStruct(SatStruct *oldMap, int sharedMemoryfd, int count) {
-    if (oldMap != NULL) {
-        munmap(oldMap, sizeof(SatStruct));
+char* getNextSolved(char *map, char **output, int sharedMemoryfd, int * count) {
+    printf("TOY\n");
+    long separatorPosition = findSeparatorN(map, &count);
+    if (map != NULL) {
+        *count+= strlen(*output);
+        munmap(map, strlen(*output));
     }
-
-    SatStruct *satStruct = (SatStruct*) mmap(NULL, sizeof(SatStruct), PROT_READ, MAP_SHARED, sharedMemoryfd, count * sizeof(SatStruct));
-    if (satStruct == NULL) {
+    map = (char*) mmap(NULL, sizeof(*map), PROT_READ, MAP_SHARED, sharedMemoryfd, *count);
+    if (map == NULL) {
         perror("Could not map shared memory: ");
         close(sharedMemoryfd);
         exit(ERROR_MMAP_FAIL);
     }
 
-    return satStruct;
+
+    return map;
+}
+
+long findSeparatorN(char *s, int max){
+    int count = 0;
+    while((s[count] != 0) && count < max){
+        if(s[count] == '\n')
+            if(s[count+1] == '\n')
+                return count+1;
+        count++;
+    }
+    return -1;
 }

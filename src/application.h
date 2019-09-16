@@ -23,15 +23,19 @@ typedef struct AppStruct {
 	int shmfd;
 	
 	int outputfd;
+
+	long shmCursorPosition;
+	long shmSize;
+	char * shmContent;
 } AppStruct;
 
 int getSlavesQuantity(int filesSize);
 void saveFile(int fd, int count, SatStruct *satStruct);
 int createAndOpenPipe(char *name);
 void sendFile(int fd, char *fileName, long fileIndex);
-void processInput(int fd, SatStruct *satStruct, char **files, int slaveId);
+void processInput(AppStruct * appStruct, int fd, SatStruct *satStruct, char **files, int slaveId);
 void terminateSlave(int fd);
-void terminateView(SatStruct *satStructs, int count, sem_t *solvedSemaphore);
+void terminateView(AppStruct *appStruct, sem_t *solvedSemaphore);
 void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize);
 void initializeSlaves(AppStruct *appStruct);
 void shutdown(AppStruct *appStruct, int exitCode);
