@@ -12,11 +12,11 @@
 #include <sys/time.h>
 #include <sys/select.h>
 #include <string.h>
-#include "utils/utils.h"
 #include "utils/slaveStruct.h"
 #include "utils/satStruct.h"
 #include "utils/errorDef.h"
 #include "application.h"
+#include "utils/utils.h"
 
 #define SHARED_MEMORY_VIEW_FILE "/tp1ViewMem%lu"
 #define SHARED_MEMORY_VIEW_FILENAME_FILE "/tp1ViewFileNameMem%lu"
@@ -38,6 +38,8 @@
 #define MAX_SHARED_MEMORY_NAME_LENGTH 256
 #define MAX_SEMAPHORE_NAME_LENGTH 256
 #define MAX_SLAVES 512 // Solves problem of "Too many files open"
+#define INIT_SIZE_PER_FILE 24
+#define SHM_CHUNK_SIZE_PER_FILE 20 
 
 int main(int argc, char **argv) {
     AppStruct appStruct;
@@ -71,7 +73,7 @@ int main(int argc, char **argv) {
                     processInput(slaveStruct.readPipefd, appStruct.satStructs + appStruct.filesSolved, &appStruct, slaveStruct.id);
                     appStruct.filesSolved++;
                     
-                    // printf("Done: %ld\n", appStruct.filesSolved);
+                    printf("Done: %ld\n", appStruct.filesSolved);
                     sem_post(appStruct.viewSemaphore);
                     if (appStruct.filesSent < appStruct.filesSize) {
                         // printf("continue\n");
@@ -132,9 +134,12 @@ void sendFile(SlaveStruct *slaveStruct, char *fileName, long fileIndex) {
 void processInput(int fd, SatStruct *satStruct, AppStruct *appStruct, int slaveId) {
     long fileIndex;
     char *data = readFromFile(fd);
+    printf("TOY\n");
+    printf("%s\n", data);
     sscanf(data, "%d\n%d\n%f\n%d\n%ld\n", &(satStruct->variables), &(satStruct->clauses), &(satStruct->processingTime), &(satStruct->isSat), &fileIndex);
+    printf("TOY\n\n");
     free(data);
-
+  
     satStruct->fileName = appStruct->files[fileIndex];
     satStruct->fileNameLength = strlen(satStruct->fileName);
     satStruct->processedBySlaveID = slaveId;
@@ -168,9 +173,8 @@ void terminateSlave(SlaveStruct *slaveStruct) {
     sem_post(slaveStruct->fileAvailableSemaphore);
 }
 
-void terminateView(SatStruct *satStructs, int count, sem_t *solvedSemaphore) {
-    SatStruct *satStruct = satStructs + count;
-    satStruct->fileName = NULL;
+void terminateView(AppStruct *appStruct, sem_t *solvedSemaphore) {
+    strcat(appStruct->shmContent, "\0");
     sem_post(solvedSemaphore);
 }
 
@@ -197,6 +201,10 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
     appStruct->shmfd = -1;
     appStruct->outputfd = -1;
     appStruct->fileNameShmfd = -1;
+
+    appStruct->shmCursorPosition = 0;
+    appStruct->shmContent = NULL;
+    appStruct->shmSize = 0;
 
     // Create shared memory
     appStruct->shmName = calloc(sizeof(char), MAX_SHARED_MEMORY_NAME_LENGTH);
@@ -244,6 +252,14 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
     if (appStruct->fileNameShmMap == MAP_FAILED) {
         perror("Could not map shared memory");
         shutdown(appStruct, ERROR_MMAP_FAIL);
+    }
+    appStruct->shmSize = filesSize * INIT_SIZE_PER_FILE;
+
+
+    appStruct->satStructs = (SatStruct*) malloc(satStructsSize);
+    if (appStruct->satStructs == NULL) {
+        perror("Could not reserve memory");
+        shutdown(appStruct, ERROR_NO_MEM);
     }
 
     // Create shared semaphore (View)
@@ -402,7 +418,7 @@ void shutdown(AppStruct *appStruct, int exitCode) {
     }
     if (appStruct->satStructs != NULL) {
         if (appStruct->viewSemaphore != NULL) {
-            terminateView(appStruct->satStructs, appStruct->filesSolved, appStruct->viewSemaphore);
+            terminateView(appStruct, appStruct->viewSemaphore);
         }
         // TODO: RACE CONDITION????
         size_t satStructsSize = sizeof(SatStruct) * (appStruct->filesSize + 1); // One more for the terminating struct
