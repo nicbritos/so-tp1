@@ -1,0 +1,34 @@
+#ifndef _COMMON_DEF_H
+#define _COMMON_DEF_H
+
+#include <linux/limits.h>
+
+#define ERROR_NO 0
+#define ERROR_NO_FILES -1
+#define ERROR_SHMOPEN_FAIL -2
+#define ERROR_FTRUNCATE_FAIL -3
+#define ERROR_MMAP_FAIL -4
+#define ERROR_SEMOPEN_FAIL -5
+#define ERROR_FIFO_CREATION_FAIL -6
+#define ERROR_FIFO_OPEN_FAIL -7
+#define ERROR_FILE_OPEN_FAIL -8
+#define ERROR_NOT_ENOUGH_ARGUMENTS -9
+#define ERROR_NO_APPLICATION_PID -10
+#define ERROR_MREMAP_FAIL -11
+
+
+#define SHARED_MEMORY_VIEW_FILE "/tp1ViewMem%lu"
+#define SHARED_MEMORY_VIEW_FILENAME_FILE "/tp1ViewFileNameMem%lu"
+#define SHARED_SEMAPHORE_VIEW_FILE "/tp1ViewSem%lu"
+
+#define INITAL_FILENAME_SHM_MAP_SIZE (sizeof(char))
+#define MAX_SHARED_MEMORY_NAME_LENGTH (NAME_MAX + 1)
+#define MAX_SEMAPHORE_NAME_LENGTH (NAME_MAX - 3)
+
+#define READ_AND_WRITE_PERM 0666
+#define WRITE_PERM 0444
+#define READ_PERM 0222
+
+#define STDOUT_FD 1
+
+#endif

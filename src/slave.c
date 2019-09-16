@@ -1,21 +1,17 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <semaphore.h>
+#define _GNU_SOURCE
+
 #include <fcntl.h>
-#include <unistd.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
+#include <stdio.h>
 #include <string.h>
-#include "slave.h"
+#include <stdlib.h>
+#include <unistd.h>
+#include <semaphore.h>
+
+#include "utils/commonDef.h"
 #include "utils/utils.h"
-#include "utils/errorDef.h"
-#include "utils/satStruct.h"
+#include "slave.h"
 
-#define READ_AND_WRITE_PERM 0666
-
-#define MAXSIZE 80
+#define COMMAND_LENGTH 80
 
 int main(int argc, char **argv) {
     if (argc < 3) {
@@ -74,7 +70,7 @@ char *readFilepath(int pipefd, char *oldFilepath, sem_t *semaphore, long *fileId
 }
 
 void processFile(int pipefd, char *filepath, long fileId) {
-    char *command = malloc(MAXSIZE + strlen(filepath) + 1);
+    char *command = malloc(COMMAND_LENGTH + strlen(filepath) + 1);
     sprintf(command, "%s %s | %s","minisat", filepath, "egrep \"Number of|CPU|SAT\" | egrep -o \"[0-9]+\\.?[0-9]*|(UN)?SAT\"");
     FILE *output = popen(command, "r");
     free(command);

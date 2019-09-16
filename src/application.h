@@ -28,10 +28,6 @@ typedef struct AppStruct {
 	int shmfd;
 	
 	int outputfd;
-
-	long shmCursorPosition;
-	long shmSize;
-	char * shmContent;
 } AppStruct;
 
 int getSlavesQuantity(int filesSize);

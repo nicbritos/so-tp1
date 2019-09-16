@@ -1,12 +1,12 @@
-#include <stdlib.h>
+#define _GNU_SOURCE
+
 #include <stdio.h>
-#include <unistd.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <fcntl.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+#include "commonDef.h"
 #include "utils.h"
-#include "errorDef.h"
 
 #define CHUNK 5
 

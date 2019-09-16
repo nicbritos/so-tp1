@@ -1,30 +1,19 @@
-#define _GNU_SOURCE 1
+#define _GNU_SOURCE
+
 #include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
-#include <semaphore.h>
 #include <fcntl.h>
+#include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <string.h>
-#include <sys/wait.h>
-#include "utils/utils.h"
+#include <semaphore.h>
+
 #include "utils/satStruct.h"
+#include "utils/commonDef.h"
+#include "utils/utils.h"
 #include "view.h"
-#include "utils/errorDef.h"
-
-#define SHARED_MEMORY_VIEW_FILE "/tp1ViewMem%lu"
-#define SHARED_MEMORY_VIEW_FILENAME_FILE "/tp1ViewFileNameMem%lu"
-#define SHARED_SEMAPHORE_VIEW_FILE "/tp1ViewSem%lu"
-
-#define INITAL_FILENAME_SHM_MAP_SIZE (sizeof(char))
-
-#define READ_PERM 0222
-#define MAX_SHARED_MEMORY_NAME_LENGTH 256
-#define MAX_SEMAPHORE_NAME_LENGTH 256
-#define STDOUT_FD 1
 
 int main(int argc, char **argv) {
     long unsigned pid;
