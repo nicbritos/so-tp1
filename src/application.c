@@ -364,7 +364,6 @@ void shutdownSlave(SlaveStruct *slaveStruct) {
         terminateSlave(slaveStruct);
         close(slaveStruct->writePipefd);
         remove(slaveStruct->writePipeName);
-        printf("RemovedWrite\n");
         slaveStruct->writePipefd = -1;
     }
     if (slaveStruct->fileAvailableSemaphore != NULL) {
@@ -407,7 +406,6 @@ void shutdown(AppStruct *appStruct, int exitCode) {
     if (appStruct->satStructs != NULL) {
         if (appStruct->viewSemaphore != NULL) {
             terminateView(appStruct->satStructs, appStruct->filesSolved, appStruct->viewSemaphore);
-            appStruct->viewSemaphore = NULL;
         }
         munmap(appStruct->satStructs, appStruct->satStructsSize);
         appStruct->satStructs = NULL;
