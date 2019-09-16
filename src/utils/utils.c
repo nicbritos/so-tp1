@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include "utils.h"
+#include "errorDef.h"
 
 #define CHUNK 5
 
@@ -52,6 +53,9 @@ int digits(long n){
 char *readFromFile(int fd) {
     int bytesRead = 0, bytesReadThisRound = 0;
     char *out = malloc(sizeof(*out) * CHUNK);
+    if (out == NULL) {
+        return NULL;
+    }
     
     while ((bytesReadThisRound = read(fd, out + bytesRead, CHUNK)) == CHUNK) {
         bytesRead += CHUNK;

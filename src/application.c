@@ -14,6 +14,7 @@
 #include "utils/utils.h"
 #include "utils/slaveStruct.h"
 #include "utils/satStruct.h"
+#include "utils/errorDef.h"
 #include "application.h"
 
 #define SHARED_MEMORY_VIEW_FILE "/tp1ViewMem%lu"
@@ -33,16 +34,6 @@
 #define MAX_SHARED_MEMORY_NAME_LENGTH 256
 #define MAX_SEMAPHORE_NAME_LENGTH 256
 #define MAX_SLAVES 512 // Solves problem of "Too many files open"
-
-#define ERROR_NO 0
-#define ERROR_NO_FILES -1
-#define ERROR_SHMOPEN_FAIL -2
-#define ERROR_FTRUNCATE_FAIL -3
-#define ERROR_MMAP_FAIL -4
-#define ERROR_SEMOPEN_FAIL -5
-#define ERROR_FIFO_CREATION_FAIL -6
-#define ERROR_FIFO_OPEN_FAIL -7
-#define ERROR_FILE_OPEN_FAIL -8
 
 int main(int argc, char **argv) {
     AppStruct appStruct;
@@ -80,7 +71,7 @@ int main(int argc, char **argv) {
                     sem_post(appStruct.viewSemaphore);
                     if (appStruct.filesSent < appStruct.filesSize) {
                         // printf("continue\n");
-                        sendFile(slaveStruct.writePipefd, appStruct.files[appStruct.filesSent], appStruct.filesSent);
+                        sendFile(&slaveStruct, appStruct.files[appStruct.filesSent], appStruct.filesSent);
                         appStruct.filesSent++;
                         // int val;
                         // sem_getvalue(slaveStruct.fileAvailableSemaphore, &val);
@@ -89,11 +80,8 @@ int main(int argc, char **argv) {
                         // sem_getvalue(slaveStruct.fileAvailableSemaphore, &val);
                         // printf("Sem value post: %d\n", val);
                     } else {
-                        // printf("terminate\n");
-                        terminateSlave(slaveStruct.writePipefd);
-                        sem_post(slaveStruct.fileAvailableSemaphore);
-                        // close(slaveStruct.writePipefd);
-                        // slaveStruct.writePipefd = -1;
+                        terminateSlave(&slaveStruct);
+                        // shutdownSlave(&slaveStruct);
                     }
                 }
             }
@@ -103,6 +91,7 @@ int main(int argc, char **argv) {
     printf("save\n");
     saveFile(appStruct.outputfd, appStruct.filesSolved, appStruct.satStructs);
     printf("shutdown\n");
+    sleep(1); // TODO: Fix race conditions. Wait for slave to disconnect!!!!!!!!
     shutdown(&appStruct, ERROR_NO);
 }
 
@@ -121,7 +110,7 @@ void saveFile(int fd, int count, SatStruct *satStructs) {
     }
 }
 
-void sendFile(int fd, char *fileName, long fileIndex) {
+void sendFile(SlaveStruct *slaveStruct, char *fileName, long fileIndex) {
     int fileNameLength = strlen(fileName);
     int fileIndexDigits;
     if (fileIndex < 0) {
@@ -132,7 +121,7 @@ void sendFile(int fd, char *fileName, long fileIndex) {
     
     char *data = malloc(sizeof(*data) * (fileNameLength + 1 + fileIndexDigits + 2));
     sprintf(data, "%s\n%ld\n", fileName, fileIndex);
-    write(fd, data, fileNameLength + fileIndexDigits + 2);
+    write(slaveStruct->writePipefd, data, fileNameLength + fileIndexDigits + 2);
     free(data);
 }
 
@@ -146,8 +135,9 @@ void processInput(int fd, SatStruct *satStruct, char **files, int slaveId) {
     satStruct->processedBySlaveID = slaveId;
 }
 
-void terminateSlave(int fd) {
-    sendFile(fd, "\n", -1);
+void terminateSlave(SlaveStruct *slaveStruct) {
+    sendFile(slaveStruct, "\n", -1);
+    sem_post(slaveStruct->fileAvailableSemaphore);
 }
 
 void terminateView(SatStruct *satStructs, int count, sem_t *solvedSemaphore) {
@@ -208,7 +198,7 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
     }
 
     // Create the output file
-    appStruct->outputfd = open(OUT_FILE, O_CREAT | O_WRONLY, READ_AND_WRITE_PERM);
+    appStruct->outputfd = open(OUT_FILE, O_CREAT | O_WRONLY | O_TRUNC, READ_AND_WRITE_PERM);
     if (appStruct->outputfd == -1) {
         perror("Could not create output file");
         shutdown(appStruct, ERROR_FILE_OPEN_FAIL);
@@ -288,7 +278,7 @@ void initializeSlaves(AppStruct *appStruct) {
 
             pollfdStruct->fd = slaveStruct->readPipefd;
             pollfdStruct->events = POLLIN;
-            sendFile(slaveStruct->writePipefd, appStruct->files[appStruct->filesSent], appStruct->filesSent);
+            sendFile(slaveStruct, appStruct->files[appStruct->filesSent], appStruct->filesSent);
             appStruct->filesSent++;
             sem_post(slaveStruct->fileAvailableSemaphore);
         } else if (forkResult == -1) {
@@ -308,29 +298,35 @@ void initializeSlaves(AppStruct *appStruct) {
 void shutdownSlave(SlaveStruct *slaveStruct) {
     // TODO: Race condition????
     if (slaveStruct->writePipefd != -1) {
-        terminateSlave(slaveStruct->writePipefd);
+        terminateSlave(slaveStruct);
         if (slaveStruct->fileAvailableSemaphore != NULL) {
             sem_post(slaveStruct->fileAvailableSemaphore);
         }
         close(slaveStruct->writePipefd);
         remove(slaveStruct->writePipeName);
+        slaveStruct->writePipefd = -1;
     }
     if (slaveStruct->fileAvailableSemaphore != NULL) {
         sem_close(slaveStruct->fileAvailableSemaphore);
+        slaveStruct->fileAvailableSemaphore = NULL;
     }
     if (slaveStruct->fileAvailableSemaphoreName != NULL) {
         sem_unlink(slaveStruct->fileAvailableSemaphoreName);
         free(slaveStruct->fileAvailableSemaphoreName);
+        slaveStruct->fileAvailableSemaphoreName = NULL;
     }
     if (slaveStruct->readPipefd != -1) {
         close(slaveStruct->readPipefd);
         remove(slaveStruct->readPipeName);
+        slaveStruct->readPipefd = -1;
     }
     if (slaveStruct->writePipeName != NULL) {
         free(slaveStruct->writePipeName);
+        slaveStruct->writePipeName = NULL;
     }
     if (slaveStruct->readPipeName != NULL) {
         free(slaveStruct->readPipeName);
+        slaveStruct->readPipeName = NULL;
     }
 }
 

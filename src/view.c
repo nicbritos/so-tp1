@@ -12,6 +12,7 @@
 #include "utils/utils.h"
 #include "utils/satStruct.h"
 #include "view.h"
+#include "utils/errorDef.h"
 
 #define SHARED_MEMORY_VIEW_FILE "/tp1ViewMem%lu"
 #define SHARED_SEMAPHORE_VIEW_FILE "/tp1ViewSem%lu"
@@ -20,16 +21,6 @@
 #define MAX_SHARED_MEMORY_NAME_LENGTH 256
 #define MAX_SEMAPHORE_NAME_LENGTH 256
 #define STDOUT_FD 1
-
-#define ERROR_NO 0
-#define ERROR_NO_APPLICATION_PID -1
-#define ERROR_SHMOPEN_FAIL -2
-#define ERROR_FTRUNCATE_FAIL -3
-#define ERROR_MMAP_FAIL -4
-#define ERROR_SEMOPEN_FAIL -5
-#define ERROR_FIFO_CREATION_FAIL -6
-#define ERROR_FIFO_OPEN_FAIL -7
-#define ERROR_FILE_OPEN_FAIL -8
 
 int main(int argc, char **argv) {
     if (argc < 2) {
