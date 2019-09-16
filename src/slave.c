@@ -10,21 +10,12 @@
 #include <string.h>
 #include "slave.h"
 #include "utils/utils.h"
+#include "utils/errorDef.h"
 #include "utils/satStruct.h"
 
 #define READ_AND_WRITE_PERM 0666
 
 #define MAXSIZE 80
- 
-#define ERROR_NO 0
-#define ERROR_NOT_ENOUGH_ARGUMENTS -1
-#define ERROR_SHMOPEN_FAIL -2
-#define ERROR_FTRUNCATE_FAIL -3
-#define ERROR_MMAP_FAIL -4
-#define ERROR_SEMOPEN_FAIL -5
-#define ERROR_FIFO_CREATION_FAIL -6
-#define ERROR_FIFO_OPEN_FAIL -7
-#define ERROR_FILE_OPEN_FAIL -8
 
 int main(int argc, char **argv) {
     if (argc < 3) {
@@ -72,15 +63,13 @@ char *readFilepath(int pipefd, char *oldFilepath, sem_t *semaphore, long *fileId
     if (oldFilepath != NULL) {
         free(oldFilepath);
     }
-    // printf("Slave: waiting sem\n");
+    
     sem_wait(semaphore);
 
     char *data = readFromFile(pipefd);
     char *separatorPointer = strchr(data, '\n');
     sscanf(separatorPointer + 1, "%ld\n", fileId);
-    // printf("%ld\n", *fileId);
     *separatorPointer = '\0';
-
     return data;
 }
 
@@ -92,7 +81,7 @@ void processFile(int pipefd, char *filepath, long fileId) {
 
     int vars, clauses, isSat;
     float cpuTime;
-    char sat[6]; //UNSAT + \0
+    char sat[6]; // UNSAT + \0
     fscanf(output, "%d\n%d\n%f\n%s\n", &vars, &clauses, &cpuTime, sat);
     isSat = (sat[0] == 'U')?0:(sat[0] == 'S')?1:-1;
     pclose(output);

@@ -1,3 +1,4 @@
+#define _GNU_SOURCE 1
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -13,15 +14,19 @@
 #include <string.h>
 #include "utils/slaveStruct.h"
 #include "utils/satStruct.h"
+#include "utils/errorDef.h"
 #include "application.h"
 #include "utils/utils.h"
 
 #define SHARED_MEMORY_VIEW_FILE "/tp1ViewMem%lu"
+#define SHARED_MEMORY_VIEW_FILENAME_FILE "/tp1ViewFileNameMem%lu"
 #define SHARED_SEMAPHORE_VIEW_FILE "/tp1ViewSem%lu"
 #define SHARED_SEMAPHORE_SAT_FILE "/tp1SlaveSem"
 #define SHARED_PIPE_SAT_WRITE_FILE "/tmp/tp1SlavePipeW"
 #define SHARED_PIPE_SAT_READ_FILE "/tmp/tp1SlavePipeR"
 #define OUT_FILE "./tp1_output.txt"
+
+#define INITAL_FILENAME_SHM_MAP_SIZE (sizeof(char))
 
 #define INFINITE_POLL -1
 #define PIPE_IN_BUFFER_SIZE 4096
@@ -36,17 +41,6 @@
 #define INIT_SIZE_PER_FILE 24
 #define SHM_CHUNK_SIZE_PER_FILE 20 
 
-#define ERROR_NO 0
-#define ERROR_NO_FILES -1
-#define ERROR_SHMOPEN_FAIL -2
-#define ERROR_FTRUNCATE_FAIL -3
-#define ERROR_MMAP_FAIL -4
-#define ERROR_SEMOPEN_FAIL -5
-#define ERROR_FIFO_CREATION_FAIL -6
-#define ERROR_FIFO_OPEN_FAIL -7
-#define ERROR_FILE_OPEN_FAIL -8
-#define ERROR_NO_MEM -9
-
 int main(int argc, char **argv) {
     AppStruct appStruct;
     
@@ -60,7 +54,7 @@ int main(int argc, char **argv) {
 
     // Para proceso Vista
     printf("%lu\n", (long unsigned) getpid());
-    //sleep(5);
+    fflush(stdout);
 
     initializeSlaves(&appStruct);
 
@@ -76,14 +70,14 @@ int main(int argc, char **argv) {
                 if (pollfdStruct.revents & POLLIN) {
                     pollfdStruct.revents = 0;
 
-                    processInput(&appStruct, slaveStruct.readPipefd, appStruct.satStructs + appStruct.filesSolved, appStruct.files, slaveStruct.id);
+                    processInput(slaveStruct.readPipefd, appStruct.satStructs + appStruct.filesSolved, &appStruct, slaveStruct.id);
                     appStruct.filesSolved++;
                     
                     printf("Done: %ld\n", appStruct.filesSolved);
                     sem_post(appStruct.viewSemaphore);
                     if (appStruct.filesSent < appStruct.filesSize) {
                         // printf("continue\n");
-                        sendFile(slaveStruct.writePipefd, appStruct.files[appStruct.filesSent], appStruct.filesSent);
+                        sendFile(&slaveStruct, appStruct.files[appStruct.filesSent], appStruct.filesSent);
                         appStruct.filesSent++;
                         // int val;
                         // sem_getvalue(slaveStruct.fileAvailableSemaphore, &val);
@@ -92,11 +86,8 @@ int main(int argc, char **argv) {
                         // sem_getvalue(slaveStruct.fileAvailableSemaphore, &val);
                         // printf("Sem value post: %d\n", val);
                     } else {
-                        // printf("terminate\n");
-                        terminateSlave(slaveStruct.writePipefd);
-                        sem_post(slaveStruct.fileAvailableSemaphore);
-                        // close(slaveStruct.writePipefd);
-                        // slaveStruct.writePipefd = -1;
+                        terminateSlave(&slaveStruct);
+                        // shutdownSlave(&slaveStruct);
                     }
                 }
             }
@@ -106,6 +97,7 @@ int main(int argc, char **argv) {
     printf("save\n");
     saveFile(appStruct.outputfd, appStruct.filesSolved, appStruct.satStructs);
     printf("shutdown\n");
+    sleep(1); // TODO: Fix race conditions. Wait for slave to disconnect!!!!!!!!
     shutdown(&appStruct, ERROR_NO);
 }
 
@@ -124,7 +116,7 @@ void saveFile(int fd, int count, SatStruct *satStructs) {
     }
 }
 
-void sendFile(int fd, char *fileName, long fileIndex) {
+void sendFile(SlaveStruct *slaveStruct, char *fileName, long fileIndex) {
     int fileNameLength = strlen(fileName);
     int fileIndexDigits;
     if (fileIndex < 0) {
@@ -135,12 +127,11 @@ void sendFile(int fd, char *fileName, long fileIndex) {
     
     char *data = malloc(sizeof(*data) * (fileNameLength + 1 + fileIndexDigits + 2));
     sprintf(data, "%s\n%ld\n", fileName, fileIndex);
-    write(fd, data, fileNameLength + fileIndexDigits + 2);
+    write(slaveStruct->writePipefd, data, fileNameLength + fileIndexDigits + 2);
     free(data);
 }
 
-void processInput(AppStruct * appStruct, int fd, SatStruct *satStruct, char **files, int slaveId) {
-
+void processInput(int fd, SatStruct *satStruct, AppStruct *appStruct, int slaveId) {
     long fileIndex;
     char *data = readFromFile(fd);
     printf("TOY\n");
@@ -148,30 +139,38 @@ void processInput(AppStruct * appStruct, int fd, SatStruct *satStruct, char **fi
     sscanf(data, "%d\n%d\n%f\n%d\n%ld\n", &(satStruct->variables), &(satStruct->clauses), &(satStruct->processingTime), &(satStruct->isSat), &fileIndex);
     printf("TOY\n\n");
     free(data);
-    satStruct->fileName = files[fileIndex];
+  
+    satStruct->fileName = appStruct->files[fileIndex];
+    satStruct->fileNameLength = strlen(satStruct->fileName);
     satStruct->processedBySlaveID = slaveId;
 
-    int outputLength = strlen(satStruct->fileName) + 1 + digits(satStruct->variables) + 1 + digits(satStruct->clauses) + 1 + 8 + 1 + 8 + 1;
-    if(outputLength + appStruct->shmCursorPosition > appStruct->shmSize){
-        if (ftruncate(appStruct->shmfd, appStruct->shmSize + (appStruct->filesSize - appStruct->filesSolved) * SHM_CHUNK_SIZE_PER_FILE) == -1) {
+    writeFileNameToBuffer(appStruct, satStruct->fileName, satStruct->fileNameLength);
+}
+
+void writeFileNameToBuffer(AppStruct *appStruct, char *s, int length) {
+    if (appStruct->fileNameShmSize - appStruct->fileNameShmCount < length) {
+        size_t newSize = sizeof(*s) * (appStruct->fileNameShmSize + length);
+        if (ftruncate(appStruct->fileNameShmfd, newSize) == -1) {
             perror("Could not expand shared memory object");
             shutdown(appStruct, ERROR_FTRUNCATE_FAIL);
         }
-        appStruct->shmContent = (char *) mmap(NULL, appStruct->shmSize + (appStruct->filesSize - appStruct->filesSolved) * SHM_CHUNK_SIZE_PER_FILE, PROT_READ | PROT_WRITE, MAP_SHARED, appStruct->shmfd, 0);
-        if (appStruct->shmContent == NULL) {
-            perror("Could not map shared memory");
-            shutdown(appStruct, ERROR_MMAP_FAIL);
+        char *newFileNameShmMap = mremap(appStruct->fileNameShmMap, appStruct->fileNameShmSize, appStruct->fileNameShmSize + length, MREMAP_MAYMOVE);
+        if (newFileNameShmMap == MAP_FAILED) {
+            perror("Could not expand shared memory map");
+            shutdown(appStruct, ERROR_MREMAP_FAIL);
         }
-        appStruct->shmSize += (appStruct->filesSize - appStruct->filesSolved) * SHM_CHUNK_SIZE_PER_FILE;
+
+        appStruct->fileNameShmMap = newFileNameShmMap;
+        appStruct->fileNameShmSize += length;
     }
-    char * output = malloc(sizeof(*output) * outputLength);
-    sprintf(output, "%s\n%d\n%d\n%f\n%s%s\n\n", satStruct->fileName, satStruct->variables, satStruct->clauses, satStruct->processingTime, (satStruct->isSat == 0)?"UN":"","SAT");
-    strncat(appStruct->shmContent, output, outputLength);
-    free(output);
+
+    strncpy(appStruct->fileNameShmMap + appStruct->fileNameShmCount, s, length);
+    appStruct->fileNameShmCount += length;
 }
 
-void terminateSlave(int fd) {
-    sendFile(fd, "\n", -1);
+void terminateSlave(SlaveStruct *slaveStruct) {
+    sendFile(slaveStruct, "\n", -1);
+    sem_post(slaveStruct->fileAvailableSemaphore);
 }
 
 void terminateView(AppStruct *appStruct, sem_t *solvedSemaphore) {
@@ -191,19 +190,24 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
     appStruct->filesSize = filesSize;
     appStruct->filesSent = 0;
     appStruct->files = files;
+    appStruct->fileNameShmMap = NULL;
+    appStruct->fileNameShmMapName = NULL;
+    appStruct->fileNameShmSize = 0;
+    appStruct->fileNameShmCount = 0;
 
     appStruct->viewSemaphoreName = NULL;
     appStruct->viewSemaphore = NULL;
     appStruct->shmName = NULL;
     appStruct->shmfd = -1;
     appStruct->outputfd = -1;
+    appStruct->fileNameShmfd = -1;
 
     appStruct->shmCursorPosition = 0;
     appStruct->shmContent = NULL;
     appStruct->shmSize = 0;
 
     // Create shared memory
-    appStruct->shmName = calloc(1, sizeof(char) * MAX_SHARED_MEMORY_NAME_LENGTH);
+    appStruct->shmName = calloc(sizeof(char), MAX_SHARED_MEMORY_NAME_LENGTH);
     snprintf(appStruct->shmName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILE, pid);
     appStruct->shmfd = shm_open(appStruct->shmName, O_CREAT | O_RDWR, READ_AND_WRITE_PERM);
     if (appStruct->shmfd == -1) {
@@ -212,15 +216,40 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
     }
 
     // Reserve storage for shared memory
-    size_t satStructsSize = sizeof(SatStruct) * (filesSize + 1); // One more for the terminating struct
-    if (ftruncate(appStruct->shmfd, filesSize * INIT_SIZE_PER_FILE) == -1) {
+    size_t mapSize = sizeof(long) + sizeof(SatStruct) * filesSize; // Long indicates filesqty.
+    if (ftruncate(appStruct->shmfd, mapSize) == -1) {
         perror("Could not expand shared memory object");
         shutdown(appStruct, ERROR_FTRUNCATE_FAIL);
     }
 
     // Map the shared memory
-    appStruct->shmContent = (char *) mmap(NULL, filesSize * INIT_SIZE_PER_FILE, PROT_READ | PROT_WRITE, MAP_SHARED, appStruct->shmfd, 0);
-    if (appStruct->shmContent == NULL) {
+    char *map = mmap(NULL, mapSize, PROT_READ | PROT_WRITE, MAP_SHARED, appStruct->shmfd, 0);
+    *((long*) map) = filesSize;
+    appStruct->satStructs = (SatStruct*) (map + sizeof(long));
+    if (appStruct->satStructs == MAP_FAILED) {
+        perror("Could not map shared memory");
+        shutdown(appStruct, ERROR_MMAP_FAIL);
+    }
+
+    // Create shared memory
+    appStruct->fileNameShmMapName = calloc(sizeof(char), MAX_SHARED_MEMORY_NAME_LENGTH);
+    snprintf(appStruct->fileNameShmMapName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILENAME_FILE, pid);
+    appStruct->fileNameShmfd = shm_open(appStruct->fileNameShmMapName, O_CREAT | O_RDWR, READ_AND_WRITE_PERM);
+    if (appStruct->fileNameShmfd == -1) {
+        perror("Could not create shared memory object");
+        shutdown(appStruct, ERROR_SHMOPEN_FAIL);
+    }
+
+    // Reserve storage for shared memory
+    appStruct->fileNameShmSize = INITAL_FILENAME_SHM_MAP_SIZE;
+    if (ftruncate(appStruct->fileNameShmfd, appStruct->fileNameShmSize) == -1) {
+        perror("Could not expand shared memory object");
+        shutdown(appStruct, ERROR_FTRUNCATE_FAIL);
+    }
+
+    // Map the shared memory
+    appStruct->fileNameShmMap = (char*) mmap(NULL, appStruct->fileNameShmSize, PROT_READ | PROT_WRITE, MAP_SHARED, appStruct->fileNameShmfd, 0);
+    if (appStruct->fileNameShmMap == MAP_FAILED) {
         perror("Could not map shared memory");
         shutdown(appStruct, ERROR_MMAP_FAIL);
     }
@@ -243,7 +272,7 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
     }
 
     // Create the output file
-    appStruct->outputfd = open(OUT_FILE, O_CREAT | O_WRONLY, READ_AND_WRITE_PERM);
+    appStruct->outputfd = open(OUT_FILE, O_CREAT | O_WRONLY | O_TRUNC, READ_AND_WRITE_PERM);
     if (appStruct->outputfd == -1) {
         perror("Could not create output file");
         shutdown(appStruct, ERROR_FILE_OPEN_FAIL);
@@ -323,7 +352,7 @@ void initializeSlaves(AppStruct *appStruct) {
 
             pollfdStruct->fd = slaveStruct->readPipefd;
             pollfdStruct->events = POLLIN;
-            sendFile(slaveStruct->writePipefd, appStruct->files[appStruct->filesSent], appStruct->filesSent);
+            sendFile(slaveStruct, appStruct->files[appStruct->filesSent], appStruct->filesSent);
             appStruct->filesSent++;
             sem_post(slaveStruct->fileAvailableSemaphore);
         } else if (forkResult == -1) {
@@ -343,29 +372,35 @@ void initializeSlaves(AppStruct *appStruct) {
 void shutdownSlave(SlaveStruct *slaveStruct) {
     // TODO: Race condition????
     if (slaveStruct->writePipefd != -1) {
-        terminateSlave(slaveStruct->writePipefd);
+        terminateSlave(slaveStruct);
         if (slaveStruct->fileAvailableSemaphore != NULL) {
             sem_post(slaveStruct->fileAvailableSemaphore);
         }
         close(slaveStruct->writePipefd);
         remove(slaveStruct->writePipeName);
+        slaveStruct->writePipefd = -1;
     }
     if (slaveStruct->fileAvailableSemaphore != NULL) {
         sem_close(slaveStruct->fileAvailableSemaphore);
+        slaveStruct->fileAvailableSemaphore = NULL;
     }
     if (slaveStruct->fileAvailableSemaphoreName != NULL) {
         sem_unlink(slaveStruct->fileAvailableSemaphoreName);
         free(slaveStruct->fileAvailableSemaphoreName);
+        slaveStruct->fileAvailableSemaphoreName = NULL;
     }
     if (slaveStruct->readPipefd != -1) {
         close(slaveStruct->readPipefd);
         remove(slaveStruct->readPipeName);
+        slaveStruct->readPipefd = -1;
     }
     if (slaveStruct->writePipeName != NULL) {
         free(slaveStruct->writePipeName);
+        slaveStruct->writePipeName = NULL;
     }
     if (slaveStruct->readPipeName != NULL) {
         free(slaveStruct->readPipeName);
+        slaveStruct->readPipeName = NULL;
     }
 }
 

@@ -3,6 +3,7 @@
 
 typedef struct SatStruct {
 	char *fileName;
+	int fileNameLength;
 	int clauses;
 	int variables;
 	int isSat;
