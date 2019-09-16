@@ -1,0 +1,6 @@
+#!/bin/bash
+for f in *.cnf
+do
+	tail -n 3 $f | wc -c | xargs -I {} truncate $f -s -{} 
+	echo "$f done"
+done
