@@ -28,8 +28,6 @@ int main(int argc, char **argv) {
         pid = atol(argv[1]);
     }
 
-    printf("%lu\n", pid);
-
     //Open shared memory
     char *fileNameShmName = calloc(sizeof(char), MAX_SHARED_MEMORY_NAME_LENGTH);
     snprintf(fileNameShmName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILENAME_FILE, pid);

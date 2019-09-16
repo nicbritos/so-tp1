@@ -31,8 +31,12 @@ void dumpResults(int fd, SatStruct *satStruct) {
         satStruct->processedBySlaveID);
 }
 
-int min(int a, int b){
+long min(long a, long b){
 	return (a<b)?a:b;
+}
+
+long max(long a, long b) {
+    return a > b ? a : b;
 }
 
 int digits(long n){
@@ -51,24 +55,41 @@ int digits(long n){
 }
 
 char *readFromFile(int fd) {
-    int bytesRead = 0, bytesReadThisRound = 0;
+    int bytesRead = 0, result = 0;
+
     char *out = malloc(sizeof(*out) * CHUNK);
     if (out == NULL) {
         return NULL;
     }
-    
-    while ((bytesReadThisRound = read(fd, out + bytesRead, CHUNK)) == CHUNK) {
-        bytesRead += CHUNK;
-        out = realloc(out, sizeof(*out) * (CHUNK + bytesRead));
+
+    int size = CHUNK;
+    while ((result = read(fd, out + bytesRead, 1)) > 0 && out[bytesRead] != '\0') {
+        bytesRead++;
+
+        if ((bytesRead % CHUNK) == 0) {
+            char *aux = realloc(out, sizeof(*out) * (CHUNK + bytesRead));
+            if (aux == NULL) {
+                free(out);
+                return NULL;
+            }
+            out = aux;
+            size += CHUNK;
+        }
     }
 
-    bytesRead += bytesReadThisRound;
-    if (bytesRead == 0) {
+    if (bytesRead > 0 || result > 0) {
+        size = bytesRead + 1;
+        if ((size % CHUNK)!= 0) {
+            char *aux = realloc(out, sizeof(*out) * size);
+            if (aux == NULL) {
+                free(out);
+                return NULL;
+            }
+            out = aux;
+        }
+        return out;
+    } else {
         free(out);
         return NULL;
     }
-
-    out = realloc(out, sizeof(*out) * (bytesRead + 1)); //Espacio justo para el string y \0
-    out[bytesRead] = '\0'; //NULL terminated
-    return out;
 }

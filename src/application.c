@@ -25,6 +25,7 @@
 #define OUT_FILE "./tp1_output.txt"
 
 #define FILES_MIN_PERCENTAGE 0.05
+#define MAX_FILES_PER_SLAVE 2
 #define FILES_PER_SLAVE 10.0
 #define INFINITE_POLL -1
 #define MAX_SLAVES 512 // Solves problem of "Too many files open"
@@ -46,6 +47,7 @@ int main(int argc, char **argv) {
 
     initializeSlaves(&appStruct);
 
+    // TODO: WAit for slaves to finish
     while (appStruct.filesSolved < appStruct.filesSize) {
         int ready = poll(appStruct.pollfdStructs, appStruct.slavesQuantity, INFINITE_POLL);
         if (ready == -1) {
@@ -58,13 +60,12 @@ int main(int argc, char **argv) {
                 if (pollfdStruct.revents & POLLIN) {
                     pollfdStruct.revents = 0;
 
-                    processInput(slaveStruct.readPipefd, appStruct.satStructs + appStruct.filesSolved, &appStruct, slaveStruct.id);
+                    processInput(slaveStruct.readPipefd, appStruct.satStructs + appStruct.filesSolved, &appStruct, &slaveStruct);
                     appStruct.filesSolved++;
                     
-                    // printf("Done: %ld\n", appStruct.filesSolved);
+                    printf("Done: %ld\n", appStruct.filesSolved);
                     sem_post(appStruct.viewSemaphore);
                     if (appStruct.filesSent < appStruct.filesSize) {
-                        // printf("continue\n");
                         sendFile(&slaveStruct, appStruct.files[appStruct.filesSent], appStruct.filesSent);
                         appStruct.filesSent++;
                         // int val;
@@ -73,7 +74,8 @@ int main(int argc, char **argv) {
                         sem_post(slaveStruct.fileAvailableSemaphore);
                         // sem_getvalue(slaveStruct.fileAvailableSemaphore, &val);
                         // printf("Sem value post: %d\n", val);
-                    } else {
+                    } else if (slaveStruct.filesSent == 0) {
+                        printf("kill\n");
                         terminateSlave(&slaveStruct);
                         // shutdownSlave(&slaveStruct);
                     }
@@ -89,12 +91,12 @@ int main(int argc, char **argv) {
     shutdown(&appStruct, ERROR_NO);
 }
 
-int getSlavesQuantity(int filesSize) {
+int getSlavesQuantity(long filesSize) {
     return min(ceil(filesSize / FILES_PER_SLAVE), MAX_SLAVES);
 }
 
-int getMinFilesQuantity(int filesSize){
-    return min(floor(filesSize * FILES_MIN_PERCENTAGE), floor(FILES_PER_SLAVE/2));
+int getFilesPerSlaveQuantity(long filesSize) {
+    return max(1, min(MAX_FILES_PER_SLAVE, floor(filesSize / (float) getSlavesQuantity(filesSize))));
 }
 
 void saveFile(int fd, int count, SatStruct *satStructs) {
@@ -107,6 +109,7 @@ void saveFile(int fd, int count, SatStruct *satStructs) {
 void sendFile(SlaveStruct *slaveStruct, char *fileName, long fileIndex) {
     int fileNameLength = strlen(fileName);
     int fileIndexDigits;
+
     if (fileIndex < 0) {
         fileIndexDigits = digits(-fileIndex) + 1;
     } else {
@@ -115,11 +118,12 @@ void sendFile(SlaveStruct *slaveStruct, char *fileName, long fileIndex) {
     
     char *data = malloc(sizeof(*data) * (fileNameLength + 1 + fileIndexDigits + 2));
     sprintf(data, "%s\n%ld\n", fileName, fileIndex);
-    write(slaveStruct->writePipefd, data, fileNameLength + fileIndexDigits + 2);
+    write(slaveStruct->writePipefd, data, fileNameLength + fileIndexDigits + 3);
     free(data);
+    slaveStruct->filesSent += 1;
 }
 
-void processInput(int fd, SatStruct *satStruct, AppStruct *appStruct, int slaveId) {
+void processInput(int fd, SatStruct *satStruct, AppStruct *appStruct, SlaveStruct *slaveStruct) {
     long fileIndex;
     char *data = readFromFile(fd);
     sscanf(data, "%d\n%d\n%f\n%d\n%ld\n", &(satStruct->variables), &(satStruct->clauses), &(satStruct->processingTime), &(satStruct->isSat), &fileIndex);
@@ -127,7 +131,8 @@ void processInput(int fd, SatStruct *satStruct, AppStruct *appStruct, int slaveI
 
     satStruct->fileName = appStruct->files[fileIndex];
     satStruct->fileNameLength = strlen(satStruct->fileName);
-    satStruct->processedBySlaveID = slaveId;
+    satStruct->processedBySlaveID = slaveStruct->id;
+    slaveStruct->filesSent -= 1;
 
     writeFileNameToBuffer(appStruct, satStruct->fileName, satStruct->fileNameLength);
 }
@@ -255,6 +260,7 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
 
 void initializeSlaves(AppStruct *appStruct) {
     int slavesQuantity = getSlavesQuantity(appStruct->filesSize);
+    int filesPerSlave = getFilesPerSlaveQuantity(appStruct->filesSize);
     int slavesQuantityDigits = digits(slavesQuantity);
     int fileAvailableSemaphoreNameLength = strlen(SHARED_SEMAPHORE_SAT_FILE);
     int writePipeNameLength = strlen(SHARED_PIPE_SAT_WRITE_FILE);
@@ -262,6 +268,7 @@ void initializeSlaves(AppStruct *appStruct) {
 
     appStruct->slaveStructs = calloc(slavesQuantity, sizeof(SlaveStruct));
     appStruct->pollfdStructs = calloc(slavesQuantity, sizeof(struct pollfd));
+    appStruct->filesSent = 0;
     for (int i = 0; i < slavesQuantity; i++) {
         SlaveStruct *slaveStruct = appStruct->slaveStructs  + i;
         struct pollfd *pollfdStruct = appStruct->pollfdStructs + i;
@@ -326,9 +333,12 @@ void initializeSlaves(AppStruct *appStruct) {
 
             pollfdStruct->fd = slaveStruct->readPipefd;
             pollfdStruct->events = POLLIN;
-            sendFile(slaveStruct, appStruct->files[appStruct->filesSent], appStruct->filesSent);
-            appStruct->filesSent++;
-            sem_post(slaveStruct->fileAvailableSemaphore);
+
+            for (int j = 0; j < filesPerSlave; j++) {
+                sendFile(slaveStruct, appStruct->files[appStruct->filesSent], appStruct->filesSent);
+                appStruct->filesSent++;
+                sem_post(slaveStruct->fileAvailableSemaphore);
+            }
         } else if (forkResult == -1) {
             shutdown(appStruct, ERROR_FIFO_OPEN_FAIL);
         } else {

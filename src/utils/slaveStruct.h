@@ -10,6 +10,8 @@ typedef struct SlaveStruct {
 	char *writePipeName;
 	char *readPipeName;
 
+	int filesSent;
+
 	int writePipefd;
 	int readPipefd;
 

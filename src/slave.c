@@ -59,7 +59,7 @@ char *readFilepath(int pipefd, char *oldFilepath, sem_t *semaphore, long *fileId
     if (oldFilepath != NULL) {
         free(oldFilepath);
     }
-    
+
     sem_wait(semaphore);
 
     char *data = readFromFile(pipefd);
@@ -82,12 +82,13 @@ void processFile(int pipefd, char *filepath, long fileId) {
     isSat = (sat[0] == 'U')?0:(sat[0] == 'S')?1:-1;
     pclose(output);
 
-    char *solutionData = malloc(sizeof(*solutionData) * (digits(vars) + 1 + digits(clauses) + 1 + digits((int) cpuTime) + 7 + digits(isSat) + 1 + digits(fileId) + 2));
+    int size = sizeof(char) * (digits(vars) + 1 + digits(clauses) + 1 + digits((int) cpuTime) + 7 + digits(isSat) + 1 + digits(fileId) + 2);
+    char *solutionData = malloc(size);
     sprintf(solutionData, "%d\n%d\n%.5f\n%d\n%ld\n", vars, clauses, cpuTime, isSat, fileId);
-    sendSolution(pipefd, solutionData);
+    sendSolution(pipefd, solutionData, size);
     free(solutionData);
 }
 
-void sendSolution(int pipefd, char *solution) {
-    write(pipefd, solution, strlen(solution));
+void sendSolution(int pipefd, char *solution, int size) {
+    write(pipefd, solution, size);
 }

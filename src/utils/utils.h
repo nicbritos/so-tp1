@@ -8,7 +8,9 @@ void printError(char *s);
 
 void dumpResults(int fd, SatStruct *satStruct);
 
-int min(int a, int b);
+long min(long a, long b);
+
+long max(long a, long b);
 
 int digits(long n);
 
