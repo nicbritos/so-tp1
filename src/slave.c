@@ -32,16 +32,19 @@ int main(int argc, char **argv) {
     int writePipefd = open(writePipeName, O_WRONLY);
     if (writePipefd == -1) {
         perror("Could not open named pipe: ");
+        close(readPipefd);
         exit(ERROR_FIFO_OPEN_FAIL);
     }
     sem_t *semaphore = sem_open(semaphoreName, O_RDWR);
     if (semaphore == SEM_FAILED) {
         perror("Could not open shared semaphore");
+        close(readPipefd);
+        close(writePipefd);
         exit(ERROR_SEMOPEN_FAIL);
     }
 
-    char *filepath = NULL;
     long fileId;
+    char *filepath = NULL;
     while ((filepath = readFilepath(readPipefd, filepath, semaphore, &fileId)) != NULL && fileId >= 0) {
         processFile(writePipefd, filepath, fileId);
     }
@@ -49,7 +52,7 @@ int main(int argc, char **argv) {
         free(filepath);
     }
 
-    printf("Slave: Exit\n");
+    sem_close(semaphore);
     close(writePipefd);
     close(readPipefd);
     exit(ERROR_NO);
@@ -59,7 +62,7 @@ char *readFilepath(int pipefd, char *oldFilepath, sem_t *semaphore, long *fileId
     if (oldFilepath != NULL) {
         free(oldFilepath);
     }
-    
+
     sem_wait(semaphore);
     char *data = readFromFile(pipefd);
     char *separatorPointer = strchr(data, '\n');

@@ -2,7 +2,7 @@ CC=gcc
 CFLAGS=-Wall -pedantic -lrt -lpthread -std=c99 -lm
 SOURCES=src/application.c src/utils/utils.c
 OBJECTS=$(SOURCES:.c=.o)
-EXECUTABLE=tp1
+EXECUTABLE=solve
 
 all: application slave view
 

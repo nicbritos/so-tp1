@@ -23,7 +23,7 @@
 #define SHARED_PIPE_SAT_WRITE_FILE "/tmp/tp1SlavePipeW"
 #define SHARED_PIPE_SAT_READ_FILE "/tmp/tp1SlavePipeR"
 #define SHARED_SEMAPHORE_SAT_FILE "/tp1SlaveSem"
-#define OUT_FILE "./tp1_output.txt"
+#define OUT_FILE "./solve_output.txt"
 
 #define FILES_MIN_PERCENTAGE 0.05
 #define MAX_FILES_PER_SLAVE 2
@@ -52,7 +52,8 @@ int main(int argc, char **argv) {
     while (appStruct.filesSolved < appStruct.filesSize) {
         int ready = poll(appStruct.pollfdStructs, appStruct.slavesQuantity, INFINITE_POLL);
         if (ready == -1) {
-            // ERROR
+            perror("Error waiting for slave response");
+            shutdown(&appStruct, ERROR_WAITING_FOR_RESPONSE);
         } else if (ready != 0) {
             for (int i = 0; i < appStruct.slavesQuantity; i++) {
                 SlaveStruct *slaveStruct = appStruct.slaveStructs + i;
@@ -70,9 +71,7 @@ int main(int argc, char **argv) {
                         appStruct.filesSent++;
                         sem_post(slaveStruct->fileAvailableSemaphore);
                     } else if (slaveStruct->filesSent == 0) {
-                        // printf("fileszie0\n");
                         terminateSlave(slaveStruct);
-                        // shutdownSlave(&slaveStruct);
                     }
                 }
             }
@@ -84,11 +83,8 @@ int main(int argc, char **argv) {
     for (int i = 0; i < appStruct.slavesQuantity; i++) {
         SlaveStruct *slaveStruct = appStruct.slaveStructs + i;
         terminateSlave(slaveStruct);
-        waitpid(-1, NULL, 0);
-        // shutdownSlave(&slaveStruct);
+        waitpid(-1, NULL, 0);  // Prevent zombie
     }
-
-    printf("all finished\n");
 
     shutdown(&appStruct, ERROR_NO);
 }
@@ -166,6 +162,7 @@ void terminateSlave(SlaveStruct *slaveStruct) {
         if (slaveStruct->fileAvailableSemaphore != NULL) {
             sem_post(slaveStruct->fileAvailableSemaphore);
         }
+
         slaveStruct->terminated = 1;
     }
 }
@@ -365,12 +362,9 @@ void initializeSlaves(AppStruct *appStruct) {
 void shutdownSlave(SlaveStruct *slaveStruct) {
     if (slaveStruct->writePipefd != -1) {
         terminateSlave(slaveStruct);
-        if (slaveStruct->fileAvailableSemaphore != NULL) {
-            sem_post(slaveStruct->fileAvailableSemaphore);
-            slaveStruct->fileAvailableSemaphore = NULL;
-        }
         close(slaveStruct->writePipefd);
         remove(slaveStruct->writePipeName);
+        printf("RemovedWrite\n");
         slaveStruct->writePipefd = -1;
     }
     if (slaveStruct->fileAvailableSemaphore != NULL) {
