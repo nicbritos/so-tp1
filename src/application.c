@@ -1,3 +1,4 @@
+#define _GNU_SOURCE 1
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -18,11 +19,14 @@
 #include "application.h"
 
 #define SHARED_MEMORY_VIEW_FILE "/tp1ViewMem%lu"
+#define SHARED_MEMORY_VIEW_FILENAME_FILE "/tp1ViewFileNameMem%lu"
 #define SHARED_SEMAPHORE_VIEW_FILE "/tp1ViewSem%lu"
 #define SHARED_SEMAPHORE_SAT_FILE "/tp1SlaveSem"
 #define SHARED_PIPE_SAT_WRITE_FILE "/tmp/tp1SlavePipeW"
 #define SHARED_PIPE_SAT_READ_FILE "/tmp/tp1SlavePipeR"
 #define OUT_FILE "./tp1_output.txt"
+
+#define INITAL_FILENAME_SHM_MAP_SIZE (sizeof(char))
 
 #define INFINITE_POLL -1
 #define PIPE_IN_BUFFER_SIZE 4096
@@ -47,8 +51,8 @@ int main(int argc, char **argv) {
     initializeAppStruct(&appStruct, argv + 1, appStruct.filesSize);
 
     // Para proceso Vista
-    // sleep(2)
     printf("%lu\n", (long unsigned) getpid());
+    fflush(stdout);
 
     initializeSlaves(&appStruct);
 
@@ -64,7 +68,7 @@ int main(int argc, char **argv) {
                 if (pollfdStruct.revents & POLLIN) {
                     pollfdStruct.revents = 0;
 
-                    processInput(slaveStruct.readPipefd, appStruct.satStructs + appStruct.filesSolved, appStruct.files, slaveStruct.id);
+                    processInput(slaveStruct.readPipefd, appStruct.satStructs + appStruct.filesSolved, &appStruct, slaveStruct.id);
                     appStruct.filesSolved++;
                     
                     // printf("Done: %ld\n", appStruct.filesSolved);
@@ -125,14 +129,38 @@ void sendFile(SlaveStruct *slaveStruct, char *fileName, long fileIndex) {
     free(data);
 }
 
-void processInput(int fd, SatStruct *satStruct, char **files, int slaveId) {
+void processInput(int fd, SatStruct *satStruct, AppStruct *appStruct, int slaveId) {
     long fileIndex;
     char *data = readFromFile(fd);
     sscanf(data, "%d\n%d\n%f\n%d\n%ld\n", &(satStruct->variables), &(satStruct->clauses), &(satStruct->processingTime), &(satStruct->isSat), &fileIndex);
     free(data);
 
-    satStruct->fileName = files[fileIndex];
+    satStruct->fileName = appStruct->files[fileIndex];
+    satStruct->fileNameLength = strlen(satStruct->fileName);
     satStruct->processedBySlaveID = slaveId;
+
+    writeFileNameToBuffer(appStruct, satStruct->fileName, satStruct->fileNameLength);
+}
+
+void writeFileNameToBuffer(AppStruct *appStruct, char *s, int length) {
+    if (appStruct->fileNameShmSize - appStruct->fileNameShmCount < length) {
+        size_t newSize = sizeof(*s) * (appStruct->fileNameShmSize + length);
+        if (ftruncate(appStruct->fileNameShmfd, newSize) == -1) {
+            perror("Could not expand shared memory object");
+            shutdown(appStruct, ERROR_FTRUNCATE_FAIL);
+        }
+        char *newFileNameShmMap = mremap(appStruct->fileNameShmMap, appStruct->fileNameShmSize, appStruct->fileNameShmSize + length, MREMAP_MAYMOVE);
+        if (newFileNameShmMap == MAP_FAILED) {
+            perror("Could not expand shared memory map");
+            shutdown(appStruct, ERROR_MREMAP_FAIL);
+        }
+
+        appStruct->fileNameShmMap = newFileNameShmMap;
+        appStruct->fileNameShmSize += length;
+    }
+
+    strncpy(appStruct->fileNameShmMap + appStruct->fileNameShmCount, s, length);
+    appStruct->fileNameShmCount += length;
 }
 
 void terminateSlave(SlaveStruct *slaveStruct) {
@@ -158,15 +186,20 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
     appStruct->filesSize = filesSize;
     appStruct->filesSent = 0;
     appStruct->files = files;
+    appStruct->fileNameShmMap = NULL;
+    appStruct->fileNameShmMapName = NULL;
+    appStruct->fileNameShmSize = 0;
+    appStruct->fileNameShmCount = 0;
 
     appStruct->viewSemaphoreName = NULL;
     appStruct->viewSemaphore = NULL;
     appStruct->shmName = NULL;
     appStruct->shmfd = -1;
     appStruct->outputfd = -1;
+    appStruct->fileNameShmfd = -1;
 
     // Create shared memory
-    appStruct->shmName = calloc(1, sizeof(char) * MAX_SHARED_MEMORY_NAME_LENGTH);
+    appStruct->shmName = calloc(sizeof(char), MAX_SHARED_MEMORY_NAME_LENGTH);
     snprintf(appStruct->shmName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILE, pid);
     appStruct->shmfd = shm_open(appStruct->shmName, O_CREAT | O_RDWR, READ_AND_WRITE_PERM);
     if (appStruct->shmfd == -1) {
@@ -175,15 +208,40 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
     }
 
     // Reserve storage for shared memory
-    size_t satStructsSize = sizeof(SatStruct) * (filesSize + 1); // One more for the terminating struct
-    if (ftruncate(appStruct->shmfd, satStructsSize) == -1) {
+    size_t mapSize = sizeof(long) + sizeof(SatStruct) * filesSize; // Long indicates filesqty.
+    if (ftruncate(appStruct->shmfd, mapSize) == -1) {
         perror("Could not expand shared memory object");
         shutdown(appStruct, ERROR_FTRUNCATE_FAIL);
     }
 
     // Map the shared memory
-    appStruct->satStructs = (SatStruct*) mmap(NULL, satStructsSize, PROT_READ | PROT_WRITE, MAP_SHARED, appStruct->shmfd, 0);
-    if (appStruct->satStructs == NULL) {
+    char *map = mmap(NULL, mapSize, PROT_READ | PROT_WRITE, MAP_SHARED, appStruct->shmfd, 0);
+    *((long*) map) = filesSize;
+    appStruct->satStructs = (SatStruct*) (map + sizeof(long));
+    if (appStruct->satStructs == MAP_FAILED) {
+        perror("Could not map shared memory");
+        shutdown(appStruct, ERROR_MMAP_FAIL);
+    }
+
+    // Create shared memory
+    appStruct->fileNameShmMapName = calloc(sizeof(char), MAX_SHARED_MEMORY_NAME_LENGTH);
+    snprintf(appStruct->fileNameShmMapName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILENAME_FILE, pid);
+    appStruct->fileNameShmfd = shm_open(appStruct->fileNameShmMapName, O_CREAT | O_RDWR, READ_AND_WRITE_PERM);
+    if (appStruct->fileNameShmfd == -1) {
+        perror("Could not create shared memory object");
+        shutdown(appStruct, ERROR_SHMOPEN_FAIL);
+    }
+
+    // Reserve storage for shared memory
+    appStruct->fileNameShmSize = INITAL_FILENAME_SHM_MAP_SIZE;
+    if (ftruncate(appStruct->fileNameShmfd, appStruct->fileNameShmSize) == -1) {
+        perror("Could not expand shared memory object");
+        shutdown(appStruct, ERROR_FTRUNCATE_FAIL);
+    }
+
+    // Map the shared memory
+    appStruct->fileNameShmMap = (char*) mmap(NULL, appStruct->fileNameShmSize, PROT_READ | PROT_WRITE, MAP_SHARED, appStruct->fileNameShmfd, 0);
+    if (appStruct->fileNameShmMap == MAP_FAILED) {
         perror("Could not map shared memory");
         shutdown(appStruct, ERROR_MMAP_FAIL);
     }

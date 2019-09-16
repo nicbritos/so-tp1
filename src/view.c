@@ -1,3 +1,4 @@
+#define _GNU_SOURCE 1
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -15,7 +16,10 @@
 #include "utils/errorDef.h"
 
 #define SHARED_MEMORY_VIEW_FILE "/tp1ViewMem%lu"
+#define SHARED_MEMORY_VIEW_FILENAME_FILE "/tp1ViewFileNameMem%lu"
 #define SHARED_SEMAPHORE_VIEW_FILE "/tp1ViewSem%lu"
+
+#define INITAL_FILENAME_SHM_MAP_SIZE (sizeof(char))
 
 #define READ_PERM 0222
 #define MAX_SHARED_MEMORY_NAME_LENGTH 256
@@ -23,21 +27,60 @@
 #define STDOUT_FD 1
 
 int main(int argc, char **argv) {
+    long unsigned pid;
+
     if (argc < 2) {
-        printError("You need to provide the Applications' PID.");
-        exit(ERROR_NO_APPLICATION_PID);
+        fflush(stdin);
+        if (scanf("%lu", &pid) != 1) {
+            printError("Invalid PID");
+            exit(ERROR_NO_APPLICATION_PID);
+        }
+    } else {
+        pid = atol(argv[1]);
     }
 
-    long unsigned pid = atol(argv[1]);
+    printf("%lu\n", pid);
 
     //Open shared memory
-    char *sharedMemoryName = calloc(1, sizeof(char) * MAX_SHARED_MEMORY_NAME_LENGTH);
+    char *fileNameShmName = calloc(sizeof(char), MAX_SHARED_MEMORY_NAME_LENGTH);
+    snprintf(fileNameShmName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILENAME_FILE, pid);
+    int fileNameShmfd = shm_open(fileNameShmName, O_RDONLY, READ_PERM);
+    if (fileNameShmfd == -1) {
+        perror("Could not open shared memory object: ");
+        exit(ERROR_SHMOPEN_FAIL);
+    }
+    
+    long fileNameShmMapSize = INITAL_FILENAME_SHM_MAP_SIZE;
+    char *fileNameShmMap = mmap(NULL, fileNameShmMapSize, PROT_READ, MAP_SHARED, fileNameShmfd, 0);
+    if (fileNameShmMap == MAP_FAILED) {
+        perror("Could not map shared memory: ");
+        close(fileNameShmfd);
+        exit(ERROR_MMAP_FAIL);
+    }
+
+    //Open shared memory
+    char *sharedMemoryName = calloc(sizeof(char), MAX_SHARED_MEMORY_NAME_LENGTH);
     snprintf(sharedMemoryName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILE, pid);
     int sharedMemoryfd = shm_open(sharedMemoryName, O_RDONLY, READ_PERM);
     if (sharedMemoryfd == -1) {
         perror("Could not open shared memory object: ");
         exit(ERROR_SHMOPEN_FAIL);
     }
+    
+    char *map = mmap(NULL, sizeof(long), PROT_READ, MAP_SHARED, sharedMemoryfd, 0);
+    if (map == MAP_FAILED) {
+        perror("Could not map shared memory: ");
+        close(sharedMemoryfd);
+        exit(ERROR_MMAP_FAIL);
+    }
+
+    long filesSize = *((long*) map);
+    map = mremap(map, sizeof(long), sizeof(long) + filesSize * sizeof(SatStruct), MREMAP_MAYMOVE);
+    if (map == MAP_FAILED) {
+        perror("Could not expand shared memory map");
+        exit(ERROR_MREMAP_FAIL);
+    }
+    SatStruct *satStructs = (SatStruct*)(map + sizeof(long));
 
     //Open shared semaphore
     char *sharedSemaphoreName = calloc(1, sizeof(char) * MAX_SEMAPHORE_NAME_LENGTH);
@@ -50,43 +93,48 @@ int main(int argc, char **argv) {
     }
 
     // Print available data
-    SatStruct *satStruct = NULL;
-    int count = 0;
     int finished = 0;
-    while (!finished) {
+    long count = 0, textIndex = 0;
+    while (count != filesSize && !finished) {
         sem_wait(solvedSemaphore);
-        satStruct = getNextSatStruct(satStruct, sharedMemoryfd, count);
-        if (satStruct->fileName != NULL) {
-            printResults(satStruct);
+
+        SatStruct *satStruct = satStructs + count;
+        if (satStruct->fileNameLength != 0) {
+            processResult(*satStruct, &fileNameShmMap, &fileNameShmMapSize, &textIndex);
             count++;
         } else {
+            printf("AAA\n");
             finished = 1;
         }
     }
 
     sem_close(solvedSemaphore);
     close(sharedMemoryfd);
-    if (satStruct != NULL)
-        munmap(satStruct, sizeof(SatStruct));
+    close(fileNameShmfd);
+    munmap(map, sizeof(long) + filesSize * sizeof(char));
+    munmap(fileNameShmMap, + fileNameShmMapSize * sizeof(char));
 
     exit(0);
 }
 
-void printResults(SatStruct *satStruct) {
-    dumpResults(STDOUT_FD, satStruct);
+void processResult(SatStruct satStruct, char **strmap, long *strmapSize, long *textIndex) {
+    satStruct.fileName = malloc(sizeof(*satStruct.fileName) * (satStruct.fileNameLength + 1)); // This is a local copy!
+
+    char *newStrMap = mremap(*strmap, *strmapSize, *strmapSize + satStruct.fileNameLength, MREMAP_MAYMOVE);
+    if (newStrMap == MAP_FAILED) {
+        perror("Could not expand shared memory map");
+        exit(ERROR_MREMAP_FAIL);
+    }
+    *strmap = newStrMap;
+
+    strncpy(satStruct.fileName, *strmap + *textIndex, satStruct.fileNameLength);
+    satStruct.fileName[satStruct.fileNameLength] = '\0';
+
+    *textIndex += satStruct.fileNameLength;
+    *strmapSize += satStruct.fileNameLength;
+
+    dumpResults(STDOUT_FD, &satStruct);
+
+    free(satStruct.fileName);
 }
 
-SatStruct* getNextSatStruct(SatStruct *oldMap, int sharedMemoryfd, int count) {
-    if (oldMap != NULL) {
-        munmap(oldMap, sizeof(SatStruct));
-    }
-
-    SatStruct *satStruct = (SatStruct*) mmap(NULL, sizeof(SatStruct), PROT_READ, MAP_SHARED, sharedMemoryfd, count * sizeof(SatStruct));
-    if (satStruct == NULL) {
-        perror("Could not map shared memory: ");
-        close(sharedMemoryfd);
-        exit(ERROR_MMAP_FAIL);
-    }
-
-    return satStruct;
-}
