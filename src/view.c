@@ -52,6 +52,10 @@ int main(int argc, char **argv) {
 
 void processResult(SatStruct satStruct, ViewStruct *viewStruct) {
     satStruct.fileName = malloc(sizeof(*satStruct.fileName) * (satStruct.fileNameLength + 1)); // This is a local copy!
+    if (satStruct.fileName == NULL) {
+        printError("Error allocating memory for saving filename");
+        shutdown(viewStruct, ERROR_ALLOC_MEMORY);
+    }
 
     char *newStrMap = mremap(viewStruct->fileNameShmMap, viewStruct->fileNameShmSize, viewStruct->fileNameShmSize + satStruct.fileNameLength, MREMAP_MAYMOVE);
     if (newStrMap == MAP_FAILED) {
@@ -130,6 +134,7 @@ void initializeViewStruct(ViewStruct *viewStruct, long unsigned pid) {
     //Open shared memory
     viewStruct->fileNameShmName = calloc(sizeof(char), MAX_SHARED_MEMORY_NAME_LENGTH);
     if (viewStruct->fileNameShmName == NULL) {
+        printError("Error allocating memory for saving fileName shared memory name");
         shutdown(viewStruct, ERROR_ALLOC_MEMORY);
     }
     snprintf(viewStruct->fileNameShmName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILENAME_FILE, pid);
@@ -149,6 +154,7 @@ void initializeViewStruct(ViewStruct *viewStruct, long unsigned pid) {
     //Open shared memory
     viewStruct->satShmName = calloc(sizeof(char), MAX_SHARED_MEMORY_NAME_LENGTH);
     if (viewStruct->satShmName == NULL) {
+        printError("Error allocating memory for saving shared memory name");
         shutdown(viewStruct, ERROR_ALLOC_MEMORY);
     }
     snprintf(viewStruct->satShmName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILE, pid);
@@ -175,6 +181,7 @@ void initializeViewStruct(ViewStruct *viewStruct, long unsigned pid) {
     //Open shared semaphore
     viewStruct->semaphoreName = calloc(1, sizeof(char) * MAX_SEMAPHORE_NAME_LENGTH);
     if (viewStruct->semaphoreName == NULL) {
+        printError("Error allocating memory for saving semaphore's name");
         shutdown(viewStruct, ERROR_ALLOC_MEMORY);
     }
     snprintf(viewStruct->semaphoreName, MAX_SEMAPHORE_NAME_LENGTH, SHARED_SEMAPHORE_VIEW_FILE, pid);

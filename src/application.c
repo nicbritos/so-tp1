@@ -67,8 +67,9 @@ int main(int argc, char **argv) {
                     sem_post(appStruct.viewSemaphore);
                     if (appStruct.filesSent < appStruct.filesSize) {
                         int result = sendFile(slaveStruct, appStruct.files[appStruct.filesSent], appStruct.filesSent);
-                        if (result != ERROR_NO)
+                        if (result != ERROR_NO) {
                             shutdown(&appStruct, result);
+                        }
                         appStruct.filesSent++;
                         sem_post(slaveStruct->fileAvailableSemaphore);
                     } else if (slaveStruct->filesSent == 0) {
@@ -220,6 +221,7 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
     // Create shared memory
     appStruct->shmName = calloc(sizeof(char), MAX_SHARED_MEMORY_NAME_LENGTH);
     if (appStruct->shmName == NULL) {
+        printError("Error allocating memory for saving shared memory name");
         shutdown(appStruct, ERROR_ALLOC_MEMORY);
     }
     snprintf(appStruct->shmName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILE, pid);
@@ -248,6 +250,7 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
     // Create shared memory
     appStruct->fileNameShmMapName = calloc(sizeof(char), MAX_SHARED_MEMORY_NAME_LENGTH);
     if (appStruct->fileNameShmMapName == NULL) {
+        printError("Error allocating memory for saving fileName shared memory name");
         shutdown(appStruct, ERROR_ALLOC_MEMORY);
     }
     snprintf(appStruct->fileNameShmMapName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILENAME_FILE, pid);
@@ -274,6 +277,7 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
     // Create shared semaphore (View)
     appStruct->viewSemaphoreName = calloc(sizeof(char), MAX_SEMAPHORE_NAME_LENGTH);
     if (appStruct->viewSemaphoreName == NULL) {
+        printError("Error allocating memory for saving view's semaphore name");
         shutdown(appStruct, ERROR_ALLOC_MEMORY);
     }
     snprintf(appStruct->viewSemaphoreName, MAX_SEMAPHORE_NAME_LENGTH, SHARED_SEMAPHORE_VIEW_FILE, pid);
@@ -301,10 +305,12 @@ void initializeSlaves(AppStruct *appStruct) {
 
     appStruct->slaveStructs = calloc(slavesQuantity, sizeof(SlaveStruct));
     if (appStruct->slaveStructs == NULL) {
+        printError("Error allocating memory for saving slaveStructs");
         shutdown(appStruct, ERROR_ALLOC_MEMORY);
     }
     appStruct->pollfdStructs = calloc(slavesQuantity, sizeof(struct pollfd));
     if (appStruct->pollfdStructs == NULL) {
+        printError("Error allocating memory for saving slaveReadFds");
         shutdown(appStruct, ERROR_ALLOC_MEMORY);
     }
     appStruct->filesSent = 0;
@@ -320,6 +326,7 @@ void initializeSlaves(AppStruct *appStruct) {
         // Create Pipes Name
         slaveStruct->writePipeName = malloc(sizeof(*(slaveStruct->writePipeName)) * (writePipeNameLength + slavesQuantityDigits + 1));
         if (slaveStruct->writePipeName == NULL) {
+            printError("Error allocating memory for saving slave's write pipe name");
             shutdown(appStruct, ERROR_ALLOC_MEMORY);
         }
         strcpy(slaveStruct->writePipeName, SHARED_PIPE_SAT_WRITE_FILE);
@@ -329,6 +336,7 @@ void initializeSlaves(AppStruct *appStruct) {
         }
         slaveStruct->readPipeName = malloc(sizeof(*(slaveStruct->readPipeName)) * (readPipeNameLength + slavesQuantityDigits + 1));
         if (slaveStruct->readPipeName == NULL) {
+            printError("Error allocating memory for saving slave's read pipe name");
             shutdown(appStruct, ERROR_ALLOC_MEMORY);
         }
         strcpy(slaveStruct->readPipeName, SHARED_PIPE_SAT_READ_FILE);
@@ -338,6 +346,7 @@ void initializeSlaves(AppStruct *appStruct) {
         }
         slaveStruct->fileAvailableSemaphoreName = malloc(sizeof(*(slaveStruct->fileAvailableSemaphoreName)) * (fileAvailableSemaphoreNameLength + slavesQuantityDigits + 1));
         if (slaveStruct->fileAvailableSemaphoreName == NULL) {
+            printError("Error allocating memory for saving slave's semaphore name");
             shutdown(appStruct, ERROR_ALLOC_MEMORY);
         }
         strcpy(slaveStruct->fileAvailableSemaphoreName, SHARED_SEMAPHORE_SAT_FILE);
@@ -485,7 +494,6 @@ void shutdown(AppStruct *appStruct, int exitCode) {
         free(appStruct->fileNameShmMapName);
         appStruct->fileNameShmMapName = NULL;
     }
-
 
     exit(exitCode);
 }
