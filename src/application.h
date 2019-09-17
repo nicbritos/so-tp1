@@ -35,7 +35,7 @@ int getFilesPerSlaveQuantity(long filesSize);
 int getSlavesQuantity(long filesSize);
 void saveFile(int fd, int count, SatStruct *satStruct);
 int createAndOpenPipe(char *name);
-void sendFile(SlaveStruct *slaveStruct, char *fileName, long fileIndex);
+int sendFile(SlaveStruct *slaveStruct, char *fileName, long fileIndex);
 void processInput(int fd, SatStruct *satStruct, AppStruct *appStruct, SlaveStruct *slaveStruct);
 void terminateSlave(SlaveStruct *slaveStruct);
 void terminateView(SatStruct *satStructs, int count, sem_t *solvedSemaphore);

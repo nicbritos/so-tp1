@@ -129,6 +129,9 @@ void initializeViewStruct(ViewStruct *viewStruct, long unsigned pid) {
 
     //Open shared memory
     viewStruct->fileNameShmName = calloc(sizeof(char), MAX_SHARED_MEMORY_NAME_LENGTH);
+    if (viewStruct->fileNameShmName == NULL) {
+        shutdown(viewStruct, ERROR_ALLOC_MEMORY);
+    }
     snprintf(viewStruct->fileNameShmName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILENAME_FILE, pid);
     viewStruct->fileNameShmfd = shm_open(viewStruct->fileNameShmName, O_RDONLY, READ_PERM);
     if (viewStruct->fileNameShmfd == -1) {
@@ -145,6 +148,9 @@ void initializeViewStruct(ViewStruct *viewStruct, long unsigned pid) {
 
     //Open shared memory
     viewStruct->satShmName = calloc(sizeof(char), MAX_SHARED_MEMORY_NAME_LENGTH);
+    if (viewStruct->satShmName == NULL) {
+        shutdown(viewStruct, ERROR_ALLOC_MEMORY);
+    }
     snprintf(viewStruct->satShmName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILE, pid);
     viewStruct->satShmfd = shm_open(viewStruct->satShmName, O_RDONLY, READ_PERM);
     if (viewStruct->satShmfd == -1) {
@@ -168,6 +174,9 @@ void initializeViewStruct(ViewStruct *viewStruct, long unsigned pid) {
 
     //Open shared semaphore
     viewStruct->semaphoreName = calloc(1, sizeof(char) * MAX_SEMAPHORE_NAME_LENGTH);
+    if (viewStruct->semaphoreName == NULL) {
+        shutdown(viewStruct, ERROR_ALLOC_MEMORY);
+    }
     snprintf(viewStruct->semaphoreName, MAX_SEMAPHORE_NAME_LENGTH, SHARED_SEMAPHORE_VIEW_FILE, pid);
     viewStruct->semaphore = sem_open(viewStruct->semaphoreName, O_RDWR);
     if (viewStruct->semaphore == SEM_FAILED) {

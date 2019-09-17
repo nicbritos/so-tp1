@@ -66,7 +66,9 @@ int main(int argc, char **argv) {
                     
                     sem_post(appStruct.viewSemaphore);
                     if (appStruct.filesSent < appStruct.filesSize) {
-                        sendFile(slaveStruct, appStruct.files[appStruct.filesSent], appStruct.filesSent);
+                        int result = sendFile(slaveStruct, appStruct.files[appStruct.filesSent], appStruct.filesSent);
+                        if (result != ERROR_NO)
+                            shutdown(&appStruct, result);
                         appStruct.filesSent++;
                         sem_post(slaveStruct->fileAvailableSemaphore);
                     } else if (slaveStruct->filesSent == 0) {
@@ -109,13 +111,12 @@ int getFilesPerSlaveQuantity(long filesSize) {
 }
 
 void saveFile(int fd, int count, SatStruct *satStructs) {
-    dprintf(fd, "TP1 - MINISAT output for %d files\n", count);
     for (int i = 0; i < count; i++) {
         dumpResults(fd, satStructs + i);
     }
 }
 
-void sendFile(SlaveStruct *slaveStruct, char *fileName, long fileIndex) {
+int sendFile(SlaveStruct *slaveStruct, char *fileName, long fileIndex) {
     int fileNameLength = strlen(fileName);
     int fileIndexDigits;
 
@@ -126,15 +127,23 @@ void sendFile(SlaveStruct *slaveStruct, char *fileName, long fileIndex) {
     }
     
     char *data = malloc(sizeof(*data) * (fileNameLength + 1 + fileIndexDigits + 2));
+    if (data == NULL) {
+        return ERROR_ALLOC_MEMORY;
+    }
     sprintf(data, "%s\n%ld\n", fileName, fileIndex);
     write(slaveStruct->writePipefd, data, fileNameLength + fileIndexDigits + 3);
     free(data);
     slaveStruct->filesSent += 1;
+
+    return ERROR_NO;
 }
 
 void processInput(int fd, SatStruct *satStruct, AppStruct *appStruct, SlaveStruct *slaveStruct) {
     long fileIndex;
     char *data = readFromFile(fd);
+    if (data == NULL)
+        return;
+
     sscanf(data, "%d\n%d\n%f\n%d\n%ld\n", &(satStruct->variables), &(satStruct->clauses), &(satStruct->processingTime), &(satStruct->isSat), &fileIndex);
     free(data);
 
@@ -210,6 +219,9 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
 
     // Create shared memory
     appStruct->shmName = calloc(sizeof(char), MAX_SHARED_MEMORY_NAME_LENGTH);
+    if (appStruct->shmName == NULL) {
+        shutdown(appStruct, ERROR_ALLOC_MEMORY);
+    }
     snprintf(appStruct->shmName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILE, pid);
     appStruct->shmfd = shm_open(appStruct->shmName, O_CREAT | O_RDWR, READ_AND_WRITE_PERM);
     if (appStruct->shmfd == -1) {
@@ -235,6 +247,9 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
 
     // Create shared memory
     appStruct->fileNameShmMapName = calloc(sizeof(char), MAX_SHARED_MEMORY_NAME_LENGTH);
+    if (appStruct->fileNameShmMapName == NULL) {
+        shutdown(appStruct, ERROR_ALLOC_MEMORY);
+    }
     snprintf(appStruct->fileNameShmMapName, MAX_SHARED_MEMORY_NAME_LENGTH, SHARED_MEMORY_VIEW_FILENAME_FILE, pid);
     appStruct->fileNameShmfd = shm_open(appStruct->fileNameShmMapName, O_CREAT | O_RDWR, READ_AND_WRITE_PERM);
     if (appStruct->fileNameShmfd == -1) {
@@ -257,7 +272,10 @@ void initializeAppStruct(AppStruct *appStruct, char **files, int filesSize) {
     }
 
     // Create shared semaphore (View)
-    appStruct->viewSemaphoreName = calloc(1, sizeof(char) * MAX_SEMAPHORE_NAME_LENGTH);
+    appStruct->viewSemaphoreName = calloc(sizeof(char), MAX_SEMAPHORE_NAME_LENGTH);
+    if (appStruct->viewSemaphoreName == NULL) {
+        shutdown(appStruct, ERROR_ALLOC_MEMORY);
+    }
     snprintf(appStruct->viewSemaphoreName, MAX_SEMAPHORE_NAME_LENGTH, SHARED_SEMAPHORE_VIEW_FILE, pid);
     appStruct->viewSemaphore = sem_open(appStruct->viewSemaphoreName, O_CREAT | O_RDWR, READ_AND_WRITE_PERM, 0);
     if (appStruct->viewSemaphore == SEM_FAILED) {
@@ -282,7 +300,13 @@ void initializeSlaves(AppStruct *appStruct) {
     int readPipeNameLength = strlen(SHARED_PIPE_SAT_READ_FILE);
 
     appStruct->slaveStructs = calloc(slavesQuantity, sizeof(SlaveStruct));
+    if (appStruct->slaveStructs == NULL) {
+        shutdown(appStruct, ERROR_ALLOC_MEMORY);
+    }
     appStruct->pollfdStructs = calloc(slavesQuantity, sizeof(struct pollfd));
+    if (appStruct->pollfdStructs == NULL) {
+        shutdown(appStruct, ERROR_ALLOC_MEMORY);
+    }
     appStruct->filesSent = 0;
     for (int i = 0; i < slavesQuantity; i++) {
         SlaveStruct *slaveStruct = appStruct->slaveStructs  + i;
@@ -295,18 +319,27 @@ void initializeSlaves(AppStruct *appStruct) {
 
         // Create Pipes Name
         slaveStruct->writePipeName = malloc(sizeof(*(slaveStruct->writePipeName)) * (writePipeNameLength + slavesQuantityDigits + 1));
+        if (slaveStruct->writePipeName == NULL) {
+            shutdown(appStruct, ERROR_ALLOC_MEMORY);
+        }
         strcpy(slaveStruct->writePipeName, SHARED_PIPE_SAT_WRITE_FILE);
         sprintf(slaveStruct->writePipeName + writePipeNameLength + slavesQuantityDigits - digits(i), "%d", i);
         for (int j = 0; j < slavesQuantityDigits - digits(i); j++) {
             slaveStruct->writePipeName[writePipeNameLength + j] = '0';
         }
         slaveStruct->readPipeName = malloc(sizeof(*(slaveStruct->readPipeName)) * (readPipeNameLength + slavesQuantityDigits + 1));
+        if (slaveStruct->readPipeName == NULL) {
+            shutdown(appStruct, ERROR_ALLOC_MEMORY);
+        }
         strcpy(slaveStruct->readPipeName, SHARED_PIPE_SAT_READ_FILE);
         sprintf(slaveStruct->readPipeName + readPipeNameLength + slavesQuantityDigits - digits(i), "%d", i);
         for (int j = 0; j < slavesQuantityDigits - digits(i); j++) {
             slaveStruct->readPipeName[readPipeNameLength + j] = '0';
         }
         slaveStruct->fileAvailableSemaphoreName = malloc(sizeof(*(slaveStruct->fileAvailableSemaphoreName)) * (fileAvailableSemaphoreNameLength + slavesQuantityDigits + 1));
+        if (slaveStruct->fileAvailableSemaphoreName == NULL) {
+            shutdown(appStruct, ERROR_ALLOC_MEMORY);
+        }
         strcpy(slaveStruct->fileAvailableSemaphoreName, SHARED_SEMAPHORE_SAT_FILE);
         sprintf(slaveStruct->fileAvailableSemaphoreName + fileAvailableSemaphoreNameLength + slavesQuantityDigits - digits(i), "%d", i);
         for (int j = 0; j < slavesQuantityDigits - digits(i); j++) {
